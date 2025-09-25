@@ -163,8 +163,8 @@ class Lv0:
 
         ### Processing flags
         flags = ['BIASCORR', 'DARKCORR', 'FLATCORR']
-        for fl in flags:
-            hdr[fl] = (False, f'{fl.capitalize()} applied?')
+        for flag in flags:
+            hdr[flag] = (False, f'{flag.capitalize()} applied?')
         hdr['DATLEVEL']  = (0, 'Data Process Level')
         hdr['COMBINED']  = (False, 'Combined frames?')
 
