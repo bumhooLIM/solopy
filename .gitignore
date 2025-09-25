@@ -1,0 +1,27 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+env/
+*.env
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+
+# Build & dist
+build/
+dist/
+*.egg-info/
+
+# mscillaneous
+fig/
+data/
+solo-data/
+
+
