@@ -1,25 +1,18 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=70", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "solopy"                # package name (shown on pip install)
+name = "solopy"
 version = "0.1.0"
 description = "Astronomy tools for SOLO project"
-authors = [
-    { name="Bumhoo Lim", email="bumhoo7@snu.ac.kr" }
-]
+authors = [{ name = "Bumhoo Lim", email = "bumhoo7@snu.ac.kr" }]
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.9"
-
-dependencies = [
-    "astropy",
-    "numpy",
-    "matplotlib",
-    "sep",
-    "ccdproc",
-]
+# Keep dependencies empty while you sort packaging; you can add later.
+dependencies = []
 
 [tool.setuptools.packages.find]
-where = ["solopy*"]
+where = ["."]
+exclude = ["notebooks*", "tests*"]
