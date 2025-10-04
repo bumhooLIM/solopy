@@ -15,7 +15,7 @@ class Lv0:
     - update FITS headers for Level-0 raw data (update_header).
     """
 
-    def __init__(self, log_file: str = None):
+    def __init__(self, log_file: str | None = None):
 
         # set up console + optional file logging
         self.logger = logging.getLogger(self.__class__.__name__)
