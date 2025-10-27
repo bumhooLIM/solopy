@@ -6,11 +6,10 @@ from astropy.time import Time
 import astropy.units as u
 from datetime import datetime
 import ccdproc
-from ccdproc import CCDData # ccdproc.CCDData.read 대신 CCDData 클래스 직접 사용
+from ccdproc import CCDData 
 import astrometry # type: ignore
 import sep
 import numpy as np
-from . import _utils # <-- 1. 새로 만든 유틸리티 임포트
 
 class Lv1:
     """
@@ -26,6 +25,7 @@ class Lv1:
         """
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         self.logger.addHandler(handler)
@@ -37,32 +37,24 @@ class Lv1:
             
     def update_wcs(self, fpath_fits, outdir, return_fpath=True):
         """
-        Solve for WCS using astrometry.net and update FITS header.
-        Reads .fits/.fits.bz2 and writes to .wcs.fits.bz2.
+        Solve for WCS and update FITS header.
+        Reads .fits and writes to .wcs.fits.
         """
         fpath_fits = Path(fpath_fits)
         outdir = Path(outdir)
-        outdir.mkdir(parents=True, exist_ok=True) # 출력 디렉터리 생성
+        outdir.mkdir(parents=True, exist_ok=True)
 
-        # --- 2. 수정된 파일 읽기 ---
+        # Read input file
         try:
-            hdul, was_bz2, fobj = _utils.open_fits_any(fpath_fits)
-            # BUNIT이 없는 경우를 대비해 unit='adu'를 기본값으로 가정
-            sci = CCDData(hdul[0].data, meta=hdul[0].header, unit='adu') 
+            sci = CCDData.read(fpath_fits, unit='adu') 
         except FileNotFoundError:
             self.logger.error(f"File not found: {fpath_fits}")
             return
         except Exception as e:
             self.logger.error(f"Error reading FITS {fpath_fits}: {e}")
-            if 'hdul' in locals() and hdul: hdul.close()
-            if 'fobj' in locals() and fobj: fobj.close()
             return
-        finally:
-            if 'hdul' in locals() and hdul: hdul.close()
-            if 'fobj' in locals() and fobj: fobj.close()
-        # --- (읽기 완료) ---
 
-        # detect stars
+        # Detect sources using SEP
         sci.data = sci.data.astype(np.float32)
         try:
             bkg = sep.Background(sci.data)
@@ -73,7 +65,7 @@ class Lv1:
             self.logger.error(f"Source detection failed for {fpath_fits.name}: {e}")
             return
 
-        # solve WCS
+        # Solve WCS
         wcs_solved = False
         try:
             with astrometry.Solver(
@@ -103,7 +95,7 @@ class Lv1:
         except Exception as e:
              self.logger.warning(f"Astrometry.net solver failed for {fpath_fits.name}: {e}")
 
-        # compute center coords (WCS가 풀린 경우에만)
+        # compute center coords (only if wcs solved)
         if wcs_solved:
             try:
                 cen = (sci.header['NAXIS1']//2, sci.header['NAXIS2']//2)
@@ -119,16 +111,13 @@ class Lv1:
         else:
             self.logger.warning(f"Skipping center coord calculation for {fpath_fits.name} (no WCS).")
 
-
-        # --- 3. 수정된 파일 쓰기 ---
-        # "image.fits.bz2" -> "image.wcs.fits.bz2"
-        true_stem = _utils.get_true_stem(fpath_fits)
-        out_name = f"{true_stem}.wcs.fits.bz2" # .fits.bz2로 강제
+        # "image.fits" -> "image.wcs.fits"
+        out_name = f"{fpath_fits.stem}.wcs.fits"
         outpath = outdir / out_name
 
         new_hdu = fits.PrimaryHDU(data=sci.data, header=sci.header)
         try:
-            _utils.write_fits_any(outpath, new_hdu, as_bz2=True) # as_bz2=True로 압축 저장
+            new_hdu.writeto(outpath, overwrite=True)
             self.logger.info(f"WCS updated: {outpath.name}")
         except Exception as e:
             self.logger.error(f"Failed to write {outpath}: {e}")
@@ -139,8 +128,8 @@ class Lv1:
 
     def preprocessing(self, fpath_fits, outdir, masterdir, return_fpath=True):
         """
-        Subtract bias, dark, mask bad pixels, and flat-correct a science frame.
-        Reads .fits/.fits.bz2 and writes to .fits.bz2.
+        Subtract bias, dark, mask bad pixels, and flat-correct.
+        Reads .fits and writes Multi-Extension .fits.
         Master frames are assumed to be uncompressed .fits files.
         """
         fpath_fits = Path(fpath_fits)
@@ -148,33 +137,23 @@ class Lv1:
         masterdir = Path(masterdir)
         outdir.mkdir(parents=True, exist_ok=True)
 
-        # --- 1. 수정된 파일 읽기 (Science Frame) ---
         try:
-            hdul, was_bz2, fobj = _utils.open_fits_any(fpath_fits)
-            sci = CCDData(hdul[0].data, meta=hdul[0].header, unit='adu')
+            sci = CCDData.read(fpath_fits, unit='adu')
         except FileNotFoundError:
             self.logger.error(f"File not found: {fpath_fits}")
             return
         except Exception as e:
             self.logger.error(f"Error reading FITS {fpath_fits}: {e}")
-            if 'hdul' in locals() and hdul: hdul.close()
-            if 'fobj' in locals() and fobj: fobj.close()
-            return
-        finally:
-            if 'hdul' in locals() and hdul: hdul.close()
-            if 'fobj' in locals() and fobj: fobj.close()
-        # --- (읽기 완료) ---
 
         try:
-            # load masters (Master-frames는 .fits로 가정, _select_master는 ccdproc.read 사용)
             mbias = self._select_master(masterdir, 'BIAS', sci.header['JD'])
             mdark = self._select_master(masterdir, 'DARK', sci.header['JD'], sci.header['EXPTIME'])
-            mflat = self._select_master(masterdir, 'FLAT', sci.header['JD']) # 참고: Flat은 필터별로 필요할 수 있음
+            mflat = self._select_master(masterdir, 'FLAT', sci.header['JD'])
         except Exception as e:
             self.logger.error(f"Failed to load master frames for {fpath_fits.name}: {e}")
             return
             
-        # bias
+        # Bias
         try:
             bsci = ccdproc.subtract_bias(sci, mbias)
             bsci.meta['BIASCORR'] = (True, "Bias corrected?")
@@ -205,66 +184,34 @@ class Lv1:
 
         # 3. 수정된 파일 쓰기 (멀티-익스텐션 FITS)
         if 'RACEN' not in psci.header or 'DECCEN' not in psci.header:
-             self.logger.warning(f"RACEN/DECCEN not in header for {fpath_fits.name}. Using original name for output.")
-             true_stem = _utils.get_true_stem(fpath_fits)
-             outname = f"{true_stem}.proc.fits.bz2"
+            self.logger.warning(f"RACEN/DECCEN not in header for {fpath_fits.name}. Using original name.")
+            # 'image.wcs.fits' -> 'image.wcs.proc.fits'
+            outname = f"{fpath_fits.stem}.proc.fits"
+            
         else:
             rac = int(round(psci.header['RACEN']))
             dec = int(round(psci.header['DECCEN']))
             pm = 'p' if dec >= 0 else 'n'
             exp = int(round(psci.header['EXPTIME']))
             obst = Time(psci.header['DATE-OBS']).strftime("%Y%m%d%H%M%S")
-            outname = f"kl4040.sci.{rac:03d}.{pm}{abs(dec):02d}.{exp:03d}.{obst}.fits.bz2"
-            
-        # # --- 3. 수정된 파일 쓰기 ---
-        # # build output name (WCS가 있어야 RACEN, DECCEN 사용 가능)
-        # if 'RACEN' not in psci.header or 'DECCEN' not in psci.header:
-        #      self.logger.warning(f"RACEN/DECCEN not in header for {fpath_fits.name}. Using original name for output.")
-        #      true_stem = _utils.get_true_stem(fpath_fits)
-        #      outname = f"{true_stem}.proc.fits.bz2"
-        # else:
-        #     rac = int(round(psci.header['RACEN']))
-        #     dec = int(round(psci.header['DECCEN']))
-        #     pm = 'p' if dec >= 0 else 'n'
-        #     exp = int(round(psci.header['EXPTIME']))
-        #     obst = Time(psci.header['DATE-OBS']).strftime("%Y%m%d%H%M%S")
-        #     # 파일명에 .fits.bz2 강제
-        #     outname = f"kl4040.sci.{rac:03d}.{pm}{abs(dec):02d}.{exp:03d}.{obst}.fits.bz2"
+            # 파일명 .fits로 수정
+            outname = f"kl4040.sci.{rac:03d}.{pm}{abs(dec):02d}.{exp:03d}.{obst}.fits"
         
         outpath = outdir / outname
-        
-        # # CCDData 객체를 PrimaryHDU로 변환
-        # new_hdu = fits.PrimaryHDU(data=psci.data, header=psci.header)
-        
-        # try:
-        #     _utils.write_fits_any(outpath, new_hdu, as_bz2=True) # as_bz2=True로 압축 저장
-        #     self.logger.info(f"Preprocessing complete: {outname}")
-        # except Exception as e:
-        #     self.logger.error(f"Failed to write {outpath}: {e}")
-        #     return
-            
-        # if return_fpath:
-        #     return outpath
         
         # 1. Primary HDU (Science Data) 생성
         primary_hdu = fits.PrimaryHDU(data=psci.data, header=psci.header)
         
         # 2. Mask HDU (ImageHDU) 생성
-        # FITS 표준은 boolean이 아닌 정수(0, 1)를 권장. uint8이 가장 효율적.
         if psci.mask is not None:
             mask_data = psci.mask.astype(np.uint8)
             mask_hdu = fits.ImageHDU(data=mask_data, name='MASK')
-            self.logger.info(f"Mask extension created for {fpath_fits.name}")
-            # HDU 리스트로 묶기
             hdul_out = fits.HDUList([primary_hdu, mask_hdu])
         else:
-            # 마스크가 없으면 Primary HDU만 사용
-            self.logger.warning(f"No mask was generated for {fpath_fits.name}, saving primary HDU only.")
             hdul_out = fits.HDUList([primary_hdu])
         
         try:
-            # _utils.write_fits_any는 HDUList 객체를 받아 압축 저장함
-            _utils.write_fits_any(outpath, hdul_out, as_bz2=True)
+            hdul_out.writeto(outpath, overwrite=True)
             self.logger.info(f"Preprocessing complete (MEF): {outname}")
         except Exception as e:
             self.logger.error(f"Failed to write MEF {outpath}: {e}")

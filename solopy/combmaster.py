@@ -26,6 +26,7 @@ class CombMaster:
         """
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         self.logger.addHandler(handler)
@@ -35,7 +36,7 @@ class CombMaster:
             self.logger.addHandler(file_h)
 
     def _load_ccd_list(self, file_list):
-        """Helper to load a list of compressed/uncompressed FITS into CCDData objects."""
+        """Helper to load a list of .fits paths into CCDData objects."""
         ccd_list = []
         if not file_list:
             return ccd_list
@@ -44,15 +45,10 @@ class CombMaster:
         for fpath in file_list:
             fpath = Path(fpath)
             try:
-                hdul, _, fobj = _utils.open_fits_any(fpath)
-                # BUNIT이 없는 경우를 대비해 unit='adu'를 기본값으로 가정
-                ccd = CCDData(hdul[0].data, meta=hdul[0].header, unit='adu')
+                ccd = CCDData.read(fpath, unit='adu')
                 ccd_list.append(ccd)
             except Exception as e:
                 self.logger.error(f"Failed to load {fpath.name}: {e}")
-            finally:
-                if 'hdul' in locals() and hdul: hdul.close()
-                if 'fobj' in locals() and fobj: fobj.close()
         return ccd_list
 
     def make_mbias(self, bias_frames_paths, master_dir):
@@ -92,13 +88,16 @@ class CombMaster:
             'COMBINED': (True, "Combined frame?"),
             'NCOMBINE': (len(bias_ccds), "Number of combined frames"),
             'IMAGETYP': 'BIAS',
+            'JD': (hdr0.get('JD', 'NaN'), "Julian Date of first bias"),
+            'OBSDATE': (obsdate, "YYYYMMDD observation date"),
             'HISTORY': f"({datetime.now().isoformat()}) Combined {len(bias_ccds)} bias frames."
         })
-        
+
         # 3. Save as uncompressed .fits
         new_hdu = fits.PrimaryHDU(data=mbias.data, header=mbias.meta)
-        _utils.write_fits_any(out_name, new_hdu, as_bz2=False)
+        new_hdu.writeto(out_name, overwrite=True)
         self.logger.info(f"Master bias saved to {out_name.name}")
+        
         return out_name
 
     def make_mdark(self, dark_frames_paths, master_dir, key_exptime='EXPTIME'):
@@ -116,21 +115,23 @@ class CombMaster:
             self.logger.error("No master bias found in {master_dir}. Run make_mbias first.")
             return []
             
-        # 2. Load all dark frames from .fits.bz2
+        # 2. Load all dark frames
         dark_ccds = self._load_ccd_list(dark_frames_paths)
         if not dark_ccds:
             self.logger.error("No dark frames loaded. Aborting make_mdark.")
             return []
-
+        
         # 3. Find closest bias
         hdr0_dark = dark_ccds[0].header
         obs_jd = hdr0_dark['JD']
-        jd_series = mbias_coll.summary['jd'].astype(float)
+        df_bias = mbias_coll.summary.to_pandas()
+        jd_key = 'jd' if 'jd' in df_bias.columns else 'JD'
+        jd_series = df_bias[jd_key].astype(float)
         idx = (abs(jd_series - obs_jd)).idxmin()
         bias_path = Path(mbias_coll.files_filtered(include_path=True)[idx])
         mbias = CCDData.read(bias_path, unit='adu')
         self.logger.info(f"Using master bias: {bias_path.name}")
-
+        
         # 4. Group darks by exposure time and subtract bias
         grouped_darks = {}
         for ccd in dark_ccds:
@@ -166,10 +167,12 @@ class CombMaster:
             
             mdark.meta.update({'COMBINED': True,'NCOMBINE': len(ccd_list),'IMAGETYP':'DARK',
                                'EXPTIME': (exp, "Exposure Time (sec)"),
+                               'JD': (hdr0_dark.get('JD', 'NaN'), "Julian Date of first dark"),
+                               'OBSDATE': (obsdate, "YYYYMMDD observation date"),
                                'HISTORY':f"Combined {len(ccd_list)} darks at {datetime.now().isoformat()}"})
             
             new_hdu = fits.PrimaryHDU(data=mdark.data, header=mdark.meta)
-            _utils.write_fits_any(out_dark, new_hdu, as_bz2=False) # Save as .fits
+            new_hdu.writeto(out_dark, overwrite=True)
             self.logger.info(f"Master dark saved to {out_dark.name}")
             out_files.append(out_dark)
             

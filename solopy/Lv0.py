@@ -1,6 +1,4 @@
 import logging
-import bz2
-import io
 from astropy.io import fits
 from astropy.coordinates import Angle, SkyCoord, GCRS, GeocentricTrueEcliptic
 from astropy.coordinates import get_body, get_sun
@@ -8,12 +6,12 @@ from astropy.time import Time
 import astropy.units as u
 from datetime import datetime
 from pathlib import Path
-from . import _utils # <-- 1. 새로 만든 유틸리티 임포트
 
 class Lv0:
     """
     Class for calibration Level 0.
     - update FITS headers for Level-0 raw data (update_header).
+    - Assumes input files are uncompressed .fits files.
     """
 
     def __init__(self, log_file: str | None = None):
@@ -21,47 +19,38 @@ class Lv0:
         # set up console + optional file logging
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         self.logger.addHandler(handler)
+        
         if log_file:
             file_h = logging.FileHandler(log_file)
             file_h.setFormatter(handler.formatter)
             self.logger.addHandler(file_h)
-
-    # --- 2. 헬퍼 함수들(_is_bz2, _open_fits_any, _write_fits_any) 제거 ---
     
     def update_header(self, fpath_fits):
         """
         Validate and update FITS headers for Level-0 images.
-
-        Parameters
-        ----------
-        fpath_fits : str or pathlib.Path
-            Path to the Level-0 FITS file to update. Supports .fits and .fits.bz2
+        (Operates on .fits files IN-PLACE)
         """
         fpath = Path(fpath_fits)
         if not fpath.exists():
             self.logger.error(f"File not found: {fpath}")
             return
 
-        # --- 3. _utils 함수 사용 ---
+        # Open FITS
+        hdul = None
         try:
-            hdul, was_bz2, fobj = _utils.open_fits_any(fpath)
-            hdr = hdul[0].header.copy()
+            hdul = fits.open(fpath)
+            hdr  = hdul[0].header.copy()
             data = hdul[0].data.copy()
         except Exception as e:
             self.logger.error(f"Failed to open {fpath}: {e}")
-            if 'hdul' in locals() and hdul: hdul.close()
-            if 'fobj' in locals() and fobj: fobj.close()
             return
         finally:
-            try:
+            if hdul:
                 hdul.close()
-            finally:
-                if fobj is not None:
-                    fobj.close()
-        # --- (읽기 완료) ---
 
         # Remove all HISTORY cards if present
         while 'HISTORY' in hdr:
@@ -80,6 +69,7 @@ class Lv0:
         hdr['FOCUS']        = (int(hdr['FOCUS']), 'Focal Position')
         hdr['OBSERVER']     = (hdr['OBSERVER'].upper(), 'Observer')
         hdr['IMAGETYP']     = (hdr['IMAGETYP'].upper(), 'Image Type')
+        hdr['BUNIT']        = ('adu', 'array data unit')
 
         # --- Telescope & Site
         for key, unit, comment in [
@@ -120,12 +110,11 @@ class Lv0:
             self.logger.warning(f"Coordinate calculation failed for {fpath.name}: {e}")
 
         hdr['HISTORY'] = f"({datetime.now().isoformat()}) LV0 header updated."
-
-        # --- 4. _utils 함수 사용 (Write back) ---
+             
+        # Write FITS with updated header
         new_hdu = fits.PrimaryHDU(data=data, header=hdr)
         try:
-            # Lv0는 원본 파일에 덮어쓰므로 원본의 압축 상태(was_bz2)를 유지
-            _utils.write_fits_any(fpath, new_hdu, as_bz2=was_bz2)
+            new_hdu.writeto(fpath, overwrite=True)
             self.logger.info(f"Updated LV0 header: {fpath.name}")
         except Exception as e:
-             self.logger.error(f"Failed to write updated header to {fpath}: {e}")
+            self.logger.error(f"Failed to write updated header to {fpath}: {e}")
