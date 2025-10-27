@@ -175,107 +175,107 @@ class CombMaster:
             
         return out_files
 
-    def make_mflat(self, flat_frames_paths, master_dir, filter_name, key_exptime='EXPTIME'):
-        """
-        Create a master flat frame by subtracting bias and dark.
-        Input: List of paths (.fits or .fits.bz2)
-        Output: Master Flat (.fits)
-        """
-        self.logger.info(f"Starting master flat creation for filter {filter_name}...")
-        master_dir = Path(master_dir)
+    # def make_mflat(self, flat_frames_paths, master_dir, filter_name, key_exptime='EXPTIME'):
+    #     """
+    #     Create a master flat frame by subtracting bias and dark.
+    #     Input: List of paths (.fits or .fits.bz2)
+    #     Output: Master Flat (.fits)
+    #     """
+    #     self.logger.info(f"Starting master flat creation for filter {filter_name}...")
+    #     master_dir = Path(master_dir)
         
-        # 1. Load flats
-        flat_ccds = self._load_ccd_list(flat_frames_paths)
-        if not flat_ccds:
-            self.logger.error("No flat frames loaded. Aborting make_mflat.")
-            return None
+    #     # 1. Load flats
+    #     flat_ccds = self._load_ccd_list(flat_frames_paths)
+    #     if not flat_ccds:
+    #         self.logger.error("No flat frames loaded. Aborting make_mflat.")
+    #         return None
 
-        # 2. Load Master Bias
-        mbias_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits').filter(imagetyp='BIAS')
-        if not mbias_coll.files:
-            self.logger.error(f"No master bias found in {master_dir}. Run make_mbias first.")
-            return None
+    #     # 2. Load Master Bias
+    #     mbias_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits').filter(imagetyp='BIAS')
+    #     if not mbias_coll.files:
+    #         self.logger.error(f"No master bias found in {master_dir}. Run make_mbias first.")
+    #         return None
         
-        # 3. Load Master Darks (dict by exptime)
-        mdark_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits').filter(imagetyp='DARK')
-        if not mdark_coll.files:
-            self.logger.warning(f"No master darks found in {master_dir}. Proceeding without dark subtraction for flats.")
-            mdarks = {}
-        else:
-            mdarks = {float(h['EXPTIME']): ccdproc.CCDData.read(p, unit='adu') 
-                      for p, h in mdark_coll.headers(include_path=True).items()}
+    #     # 3. Load Master Darks (dict by exptime)
+    #     mdark_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits').filter(imagetyp='DARK')
+    #     if not mdark_coll.files:
+    #         self.logger.warning(f"No master darks found in {master_dir}. Proceeding without dark subtraction for flats.")
+    #         mdarks = {}
+    #     else:
+    #         mdarks = {float(h['EXPTIME']): ccdproc.CCDData.read(p, unit='adu') 
+    #                   for p, h in mdark_coll.headers(include_path=True).items()}
 
-        # 4. Find closest bias
-        hdr0_flat = flat_ccds[0].header
-        obs_jd = hdr0_flat['JD']
-        jd_series = mbias_coll.summary['jd'].astype(float)
-        idx = (abs(jd_series - obs_jd)).idxmin()
-        bias_path = Path(mbias_coll.files_filtered(include_path=True)[idx])
-        mbias = CCDData.read(bias_path, unit='adu')
-        self.logger.info(f"Using master bias: {bias_path.name}")
+    #     # 4. Find closest bias
+    #     hdr0_flat = flat_ccds[0].header
+    #     obs_jd = hdr0_flat['JD']
+    #     jd_series = mbias_coll.summary['jd'].astype(float)
+    #     idx = (abs(jd_series - obs_jd)).idxmin()
+    #     bias_path = Path(mbias_coll.files_filtered(include_path=True)[idx])
+    #     mbias = CCDData.read(bias_path, unit='adu')
+    #     self.logger.info(f"Using master bias: {bias_path.name}")
 
-        # 5. Process flats (bias and dark subtraction)
-        processed_flats = []
-        for ccd in flat_ccds:
-            try:
-                bflat = ccdproc.subtract_bias(ccd, mbias)
+    #     # 5. Process flats (bias and dark subtraction)
+    #     processed_flats = []
+    #     for ccd in flat_ccds:
+    #         try:
+    #             bflat = ccdproc.subtract_bias(ccd, mbias)
                 
-                # EXPTIME 또는 exptime 키 확인
-                if key_exptime.upper() in ccd.header:
-                    exptime = float(ccd.header[key_exptime.upper()])
-                elif key_exptime.lower() in ccd.header:
-                    exptime = float(ccd.header[key_exptime.lower()])
-                else:
-                    self.logger.warning(f"Cannot find key {key_exptime} in {ccd.meta['FILENAME']}. Skipping dark subtraction.")
-                    processed_flats.append(bflat)
-                    continue
+    #             # EXPTIME 또는 exptime 키 확인
+    #             if key_exptime.upper() in ccd.header:
+    #                 exptime = float(ccd.header[key_exptime.upper()])
+    #             elif key_exptime.lower() in ccd.header:
+    #                 exptime = float(ccd.header[key_exptime.lower()])
+    #             else:
+    #                 self.logger.warning(f"Cannot find key {key_exptime} in {ccd.meta['FILENAME']}. Skipping dark subtraction.")
+    #                 processed_flats.append(bflat)
+    #                 continue
 
-                # Find closest dark
-                if not mdarks:
-                    processed_flats.append(bflat) # No darks available
-                    continue
+    #             # Find closest dark
+    #             if not mdarks:
+    #                 processed_flats.append(bflat) # No darks available
+    #                 continue
                     
-                closest_exp_dark = min(mdarks.keys(), key=lambda k: abs(k - exptime))
-                mdark = mdarks[closest_exp_dark]
-                if abs(closest_exp_dark - exptime) > 1.0: # 1초 이상 차이나면 경고
-                    self.logger.warning(f"Using dark {closest_exp_dark}s for flat {exptime}s.")
+    #             closest_exp_dark = min(mdarks.keys(), key=lambda k: abs(k - exptime))
+    #             mdark = mdarks[closest_exp_dark]
+    #             if abs(closest_exp_dark - exptime) > 1.0: # 1초 이상 차이나면 경고
+    #                 self.logger.warning(f"Using dark {closest_exp_dark}s for flat {exptime}s.")
                 
-                bdflat = ccdproc.subtract_dark(bflat, mdark, exposure_time=key_exptime, exposure_unit=u.second)
-                processed_flats.append(bdflat)
+    #             bdflat = ccdproc.subtract_dark(bflat, mdark, exposure_time=key_exptime, exposure_unit=u.second)
+    #             processed_flats.append(bdflat)
                 
-            except Exception as e:
-                self.logger.error(f"Failed to process flat {ccd.meta.get('FILENAME', 'unknown file')}: {e}")
+    #         except Exception as e:
+    #             self.logger.error(f"Failed to process flat {ccd.meta.get('FILENAME', 'unknown file')}: {e}")
 
-        # 6. Combine processed flats
-        if not processed_flats:
-            self.logger.error("No flat frames were successfully processed.")
-            return None
+    #     # 6. Combine processed flats
+    #     if not processed_flats:
+    #         self.logger.error("No flat frames were successfully processed.")
+    #         return None
             
-        self.logger.info(f"Combining {len(processed_flats)} processed flat frames...")
+    #     self.logger.info(f"Combining {len(processed_flats)} processed flat frames...")
         
-        def inv_median_scale(a):
-            return 1.0 / np.nanmedian(a)
+    #     def inv_median_scale(a):
+    #         return 1.0 / np.nanmedian(a)
 
-        mflat = ccdproc.combine(processed_flats,
-                             method='median',
-                             scale=inv_median_scale, # 스케일링
-                             sigma_clip=True,
-                             sigma_clip_low_thresh=5,
-                             sigma_clip_high_thresh=5,
-                             sigma_clip_func=np.ma.median,
-                             sigma_clip_dev_func=mad_std,
-                             mem_limit=500e6,
-                             dtype=np.float32
-                             )
+    #     mflat = ccdproc.combine(processed_flats,
+    #                          method='median',
+    #                          scale=inv_median_scale, # 스케일링
+    #                          sigma_clip=True,
+    #                          sigma_clip_low_thresh=5,
+    #                          sigma_clip_high_thresh=5,
+    #                          sigma_clip_func=np.ma.median,
+    #                          sigma_clip_dev_func=mad_std,
+    #                          mem_limit=500e6,
+    #                          dtype=np.float32
+    #                          )
         
-        obsdate = hdr0_flat.get('OBSDATE', Time(hdr0_flat['JD'], format='jd').to_datetime().strftime('%Y%m%d'))
-        out_flat = master_dir / f"kl4040.flat.{filter_name}.{obsdate}.fits"
+    #     obsdate = hdr0_flat.get('OBSDATE', Time(hdr0_flat['JD'], format='jd').to_datetime().strftime('%Y%m%d'))
+    #     out_flat = master_dir / f"kl4040.flat.{filter_name}.{obsdate}.fits"
         
-        mflat.meta.update({'COMBINED': True, 'NCOMBINE': len(processed_flats),
-                           'FILTER': filter_name, 'IMAGETYP':'FLAT',
-                           'HISTORY':f"Combined {len(processed_flats)} flats at {datetime.now().isoformat()}"})
+    #     mflat.meta.update({'COMBINED': True, 'NCOMBINE': len(processed_flats),
+    #                        'FILTER': filter_name, 'IMAGETYP':'FLAT',
+    #                        'HISTORY':f"Combined {len(processed_flats)} flats at {datetime.now().isoformat()}"})
 
-        new_hdu = fits.PrimaryHDU(data=mflat.data, header=mflat.meta)
-        _utils.write_fits_any(out_flat, new_hdu, as_bz2=False) # Save as .fits
-        self.logger.info(f"Master flat saved to {out_flat.name}")
-        return out_flat
+    #     new_hdu = fits.PrimaryHDU(data=mflat.data, header=mflat.meta)
+    #     _utils.write_fits_any(out_flat, new_hdu, as_bz2=False) # Save as .fits
+    #     self.logger.info(f"Master flat saved to {out_flat.name}")
+    #     return out_flat

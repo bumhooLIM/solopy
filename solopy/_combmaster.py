@@ -125,7 +125,7 @@ class CombMaster:
         if not mbias_coll.files:
             self.logger.error("No master bias found.")
             return []
-        if not dark_frames:
+        if not dark_frames: 
             self.logger.warning("No dark frames provided.")
             return []
         hdr0 = fits.getheader(dark_frames[0])
