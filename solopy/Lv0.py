@@ -6,7 +6,6 @@ from astropy.time import Time
 import astropy.units as u
 from datetime import datetime
 from pathlib import Path
-
 class Lv0:
     """
     Class for calibration Level 0.
