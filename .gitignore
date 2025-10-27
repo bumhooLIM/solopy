@@ -19,7 +19,7 @@ build/
 dist/
 *.egg-info/
 
-# mscillaneous
+# msciallaneous
 fig/
 data/
 solo-data/

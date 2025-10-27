@@ -11,7 +11,7 @@ import numpy as np
 import warnings
 from datetime import datetime
 # from tqdm import tqdm
-import _fileutil as fileutil
+from . import _fileutil as fileutil
 
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
 
