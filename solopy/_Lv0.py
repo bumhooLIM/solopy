@@ -8,7 +8,6 @@ from astropy.time import Time
 import astropy.units as u
 from datetime import datetime
 from pathlib import Path
-from . import _utils # <-- 1. 새로 만든 유틸리티 임포트
 
 class Lv0:
     """
@@ -29,7 +28,36 @@ class Lv0:
             file_h.setFormatter(handler.formatter)
             self.logger.addHandler(file_h)
 
-    # --- 2. 헬퍼 함수들(_is_bz2, _open_fits_any, _write_fits_any) 제거 ---
+    # --- helpers ---
+    def _is_bz2(self, path: Path) -> bool:
+        return ".bz2" in "".join(path.suffixes)
+
+    def _open_fits_any(self, path: Path):
+        """
+        Open .fits or .fits.bz2.
+
+        Returns
+        -------
+        hdul : fits.HDUList
+        was_bz2 : bool
+        fobj : file-like or None   # keep this open until after reading data
+        """
+        if self._is_bz2(path):
+            fobj = bz2.BZ2File(path, "rb")
+            hdul = fits.open(fobj, memmap=False)
+            return hdul, True, fobj
+        else:
+            hdul = fits.open(path, memmap=False)
+            return hdul, False, None
+
+    def _write_fits_any(self, path: Path, hdu: fits.PrimaryHDU, as_bz2: bool):
+        if as_bz2:
+            buf = io.BytesIO()
+            hdu.writeto(buf, overwrite=True)
+            with open(path, "wb") as f:
+                f.write(bz2.compress(buf.getvalue()))
+        else:
+            hdu.writeto(path, overwrite=True)
     
     def update_header(self, fpath_fits):
         """
@@ -45,23 +73,17 @@ class Lv0:
             self.logger.error(f"File not found: {fpath}")
             return
 
-        # --- 3. _utils 함수 사용 ---
-        try:
-            hdul, was_bz2, fobj = _utils.open_fits_any(fpath)
+        hdul, was_bz2, fobj = self._open_fits_any(fpath)
+        try:  
             hdr = hdul[0].header.copy()
             data = hdul[0].data.copy()
-        except Exception as e:
-            self.logger.error(f"Failed to open {fpath}: {e}")
-            if 'hdul' in locals() and hdul: hdul.close()
-            if 'fobj' in locals() and fobj: fobj.close()
-            return
         finally:
+
             try:
                 hdul.close()
             finally:
                 if fobj is not None:
                     fobj.close()
-        # --- (읽기 완료) ---
 
         # Remove all HISTORY cards if present
         while 'HISTORY' in hdr:
@@ -101,31 +123,24 @@ class Lv0:
         hdr['COMBINED']  = (False, 'Combined frames?')
 
         # --- Coordinates
-        try:
-            obstime = Time(hdr['JD'], format='jd')
-            coords  = SkyCoord(ra=hdr['RA']*u.deg, dec=hdr['DEC']*u.deg, frame='icrs')
-            gcrs    = coords.transform_to(GCRS(obstime=obstime))
-            gal     = coords.galactic
-            ecl     = coords.transform_to(GeocentricTrueEcliptic(equinox=obstime))
+        obstime = Time(hdr['JD'], format='jd')
+        coords  = SkyCoord(ra=hdr['RA']*u.deg, dec=hdr['DEC']*u.deg, frame='icrs')
+        gcrs    = coords.transform_to(GCRS(obstime=obstime))
+        gal     = coords.galactic
+        ecl     = coords.transform_to(GeocentricTrueEcliptic(equinox=obstime))
 
-            sun_gcrs  = get_sun(obstime)
-            moon_gcrs = get_body('Moon', obstime)
-            hdr['SELONG'] = (gcrs.separation(sun_gcrs).value,  'Solar elongation (deg)')
-            hdr['MELONG'] = (gcrs.separation(moon_gcrs).value, 'Lunar elongation (deg)')
-            hdr['GXLAT']  = (gal.b.value,  'Galactic latitude (deg)')
-            hdr['GXLON']  = (gal.l.value,  'Galactic longitude (deg)')
-            hdr['ECLAT']  = (ecl.lat.value,'Ecliptic latitude (deg)')
-            hdr['ECLON']  = (ecl.lon.value,'Ecliptic longitude (deg)')
-        except Exception as e:
-            self.logger.warning(f"Coordinate calculation failed for {fpath.name}: {e}")
+        sun_gcrs  = get_sun(obstime)
+        moon_gcrs = get_body('Moon', obstime)
+        hdr['SELONG'] = (gcrs.separation(sun_gcrs).value,  'Solar elongation (deg)')
+        hdr['MELONG'] = (gcrs.separation(moon_gcrs).value, 'Lunar elongation (deg)')
+        hdr['GXLAT']  = (gal.b.value,  'Galactic latitude (deg)')
+        hdr['GXLON']  = (gal.l.value,  'Galactic longitude (deg)')
+        hdr['ECLAT']  = (ecl.lat.value,'Ecliptic latitude (deg)')
+        hdr['ECLON']  = (ecl.lon.value,'Ecliptic longitude (deg)')
 
         hdr['HISTORY'] = f"({datetime.now().isoformat()}) LV0 header updated."
 
-        # --- 4. _utils 함수 사용 (Write back) ---
+        # --- Write back preserving compression
         new_hdu = fits.PrimaryHDU(data=data, header=hdr)
-        try:
-            # Lv0는 원본 파일에 덮어쓰므로 원본의 압축 상태(was_bz2)를 유지
-            _utils.write_fits_any(fpath, new_hdu, as_bz2=was_bz2)
-            self.logger.info(f"Updated LV0 header: {fpath.name}")
-        except Exception as e:
-             self.logger.error(f"Failed to write updated header to {fpath}: {e}")
+        self._write_fits_any(fpath, new_hdu, as_bz2=was_bz2)
+        self.logger.info(f"Updated LV0 header: {fpath}")
