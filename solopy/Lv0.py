@@ -108,7 +108,7 @@ class Lv0:
         except Exception as e:
             self.logger.warning(f"Coordinate calculation failed for {fpath.name}: {e}")
 
-        hdr['HISTORY'] = f"({datetime.now().isoformat()}) LV0 header updated."
+        hdr['HISTORY'] = f"({datetime.now().isoformat()}) LV0 header updated. (solopy.Lv0.update_header)"
              
         # Write FITS with updated header
         new_hdu = fits.PrimaryHDU(data=data, header=hdr)

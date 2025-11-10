@@ -34,8 +34,8 @@ class Lv1:
             file_h = logging.FileHandler(log_file)
             file_h.setFormatter(handler.formatter)
             self.logger.addHandler(file_h)
-            
-    def update_wcs(self, fpath_fits, outdir, return_fpath=True):
+
+    def update_wcs(self, fpath_fits, outdir, cache_directory = "astrometry_cache", return_fpath=True):
         """
         Solve for WCS and update FITS header.
         Reads .fits and writes to .wcs.fits.
@@ -46,7 +46,7 @@ class Lv1:
 
         # Read input file
         try:
-            sci = CCDData.read(fpath_fits, unit='adu') 
+            sci = CCDData.read(fpath_fits) 
         except FileNotFoundError:
             self.logger.error(f"File not found: {fpath_fits}")
             return
@@ -69,26 +69,28 @@ class Lv1:
         wcs_solved = False
         try:
             with astrometry.Solver(
-                astrometry.series_4100.index_files(cache_directory="astrometry_cache", scales={8,9,10})
+                astrometry.series_4100.index_files(cache_directory=cache_directory, scales={8,9,10}),
+                log_level=logging.WARNING
             ) as solver:
                 sol = solver.solve(
                     stars=coords,
-                    size_hint=astrometry.SizeHint(lower_arcsec_per_pixel=2.95, upper_arcsec_per_pixel=3.00),
+                    size_hint=astrometry.SizeHint(lower_arcsec_per_pixel=2.90, upper_arcsec_per_pixel=3.00),
                     position_hint=astrometry.PositionHint(
                         ra_deg=sci.header["RA"], dec_deg=sci.header["DEC"], radius_deg=5.0
                     ),
                     solution_parameters=astrometry.SolutionParameters(
-                        logodds_callback=lambda l: astrometry.Action.STOP if len(l)>=10 else astrometry.Action.CONTINUE
+                        logodds_callback=lambda l: astrometry.Action.STOP if len(l)>=10 else astrometry.Action.CONTINUE,
+                        sip_order=3
                     )
                 )
                 if sol.has_match():
                     best = sol.best_match()
                     self.logger.info(f"WCS match: RA={best.center_ra_deg:.5f}, DEC={best.center_dec_deg:.5f}, scale={best.scale_arcsec_per_pixel:.3f}" )
                     sci.wcs = best.astropy_wcs()
-                    hdr = best.astropy_wcs().to_header(relax=False)
+                    hdr = best.astropy_wcs().to_header(relax=True)
                     sci.header.extend(hdr, update=True)
                     sci.header['PIXSCALE'] = (best.scale_arcsec_per_pixel, "arcsec/pixel")
-                    sci.header['HISTORY'] = f"({datetime.now().isoformat()}) WCS updated"
+                    sci.header['HISTORY'] = f"({datetime.now().isoformat()}) WCS updated. (solopy.Lv1.update_wcs)"
                     wcs_solved = True
                 else:
                     self.logger.warning(f"No WCS solution found for {fpath_fits.name}.")
