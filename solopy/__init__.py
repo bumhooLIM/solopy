@@ -1,3 +1,3 @@
-from .Lv0 import * 
-from .Lv1 import *
+from .fitslv0 import * 
+from .fitslv1 import *
 from .combmaster import *

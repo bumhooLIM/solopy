@@ -11,7 +11,7 @@ import astrometry # type: ignore
 import sep
 import numpy as np
 
-class Lv1:
+class FitsLv1:
     """
     Class for Level-1 processing of RASA lcpy KL4040 science frames.
 
@@ -47,6 +47,8 @@ class Lv1:
         # Read input file
         try:
             sci = CCDData.read(fpath_fits) 
+        except ValueError:
+            sci = CCDData.read(fpath_fits, unit='adu')
         except FileNotFoundError:
             self.logger.error(f"File not found: {fpath_fits}")
             return
@@ -69,8 +71,7 @@ class Lv1:
         wcs_solved = False
         try:
             with astrometry.Solver(
-                astrometry.series_4100.index_files(cache_directory=cache_directory, scales={8,9,10}),
-                log_level=logging.WARNING
+                astrometry.series_4100.index_files(cache_directory=cache_directory, scales={8,9,10})
             ) as solver:
                 sol = solver.solve(
                     stars=coords,
@@ -89,7 +90,7 @@ class Lv1:
                     sci.wcs = best.astropy_wcs()
                     hdr = best.astropy_wcs().to_header(relax=True)
                     sci.header.extend(hdr, update=True)
-                    sci.header['PIXSCALE'] = (best.scale_arcsec_per_pixel, "arcsec/pixel")
+                    sci.header['PIXSCALE'] = (best.scale_arcsec_per_pixel, "[arcsec/pixel] Pixel scale")
                     sci.header['HISTORY'] = f"({datetime.now().isoformat()}) WCS updated. (solopy.Lv1.update_wcs)"
                     wcs_solved = True
                 else:
@@ -104,10 +105,10 @@ class Lv1:
                 sky = sci.wcs.pixel_to_world(*cen)
                 loc = EarthLocation(lat=sci.header['LAT']*u.deg, lon=sci.header['LON']*u.deg, height=sci.header['ELEV']*u.km)
                 altaz = sky.transform_to(AltAz(obstime=Time(sci.header['JD'], format='jd'), location=loc))
-                sci.header['RACEN'] = (sky.ra.value, "deg center RA")
-                sci.header['DECCEN'] = (sky.dec.value, "deg center DEC")
-                sci.header['ALTCEN'] = (altaz.alt.value, "deg center Alt")
-                sci.header['AZCEN'] = (altaz.az.value, "deg center Az")
+                sci.header['RACEN'] = (sky.ra.value, "[deg] Center Right Ascension")
+                sci.header['DECCEN'] = (sky.dec.value, "[deg] Center Declination")
+                sci.header['ALTCEN'] = (altaz.alt.value, "[deg] Center Altitude")
+                sci.header['AZCEN'] = (altaz.az.value, "[deg] Center Azimuth")
             except Exception as e:
                 self.logger.warning(f"Center coordinate calculation failed for {fpath_fits.name}: {e}")
         else:
