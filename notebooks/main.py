@@ -11,7 +11,7 @@ detector_name = "kl4040"
 # =============
 
 # Working directory
-WORKDIR = Path.home() / "Desktop" / "solopy" / "solo-data"
+WORKDIR = Path.home() / "Desktop" / "solo-data"
 
 # Lv0 data directory
 LV0DIR = WORKDIR/"Lv0"
