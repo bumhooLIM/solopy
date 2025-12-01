@@ -56,6 +56,8 @@ class FitsLv1:
             self.logger.error(f"Error reading FITS {fpath_fits}: {e}")
             return
 
+        sci.header["LV0FILE"] = (fpath_fits.name, "Original Level-0 file name")
+        
         # Detect sources using SEP
         sci.data = sci.data.astype(np.float32)
         try:
@@ -129,7 +131,48 @@ class FitsLv1:
         if return_fpath:
             return outpath
 
-    def correct_bdf(self, fpath_fits, outdir, masterdir, return_fpath=True):
+    def _mask_brightsource(self, data, minarea):
+        
+        # Source Extraction (sep)
+        data = data.astype(np.float32)
+        skybkg = sep.Background(data)
+        data_bkgsub = data - skybkg.back()
+        
+        source, segmap = sep.extract(
+            data_bkgsub,
+            thresh=2.5,
+            err=skybkg.globalrms,
+            minarea = minarea, # minimum area for detection
+            segmentation_map=True
+        )
+        
+        # Masking around very bright sources
+        source_bright = (source['a'] / source['b']) < 2
+        idx_bright    = np.where(source_bright)[0]       # indices in `source`
+        n_bright      = len(idx_bright)                  # number of bright sources 
+        yy, xx        = np.indices(segmap.shape)         # pixel grids
+        mask_bright   = np.zeros(segmap.shape, bool)     # mask for bright sources
+
+        # Build a circular mask around (cx,cy)
+        for idx in idx_bright:
+            label = idx + 1
+            cx, cy = source['x'][idx], source['y'][idx]
+            py, px = np.where(segmap == label)
+            d = np.hypot(px - cx, py - cy)
+            radius = d.max() + 1 #  # masking r = d + 1
+            circle_bright = (xx - cx)**2 + (yy - cy)**2 <= radius**2
+            mask_bright |= circle_bright
+            
+        return mask_bright
+
+    def correct_bdf(self,
+                    fpath_fits,
+                    outdir,
+                    masterdir,
+                    ccdmflat,
+                    ccdmask=None,
+                    return_fpath=True
+                    ):
         """
         Subtract bias, dark, mask bad pixels, and flat-correct.
         Reads .fits and writes Multi-Extension .fits.
@@ -153,17 +196,28 @@ class FitsLv1:
         try:
             mbias = self._select_master(masterdir, 'BIAS', sci.header['JD'])
             mdark = self._select_master(masterdir, 'DARK', sci.header['JD'], sci.header['EXPTIME'])
-            mflat = self._select_master(masterdir, 'FLAT', sci.header['JD'])
+            # mflat = self._select_master(masterdir, 'FLAT', sci.header['JD'])
         except Exception as e:
             self.logger.error(f"Failed to load master frames: {e}")
             return
         
-        try:
-            mask = self._select_master(masterdir, 'MASK', sci.header['JD'])
-        except Exception as e:
-            self.logger.warning(f"Failed to load master mask: {e}")
-            mask = None
-            
+        # try:
+        #     mask = self._select_master(masterdir, 'MASK', sci.header['JD'])
+        # except Exception as e:
+        #     self.logger.warning(f"Failed to load master mask: {e}")
+        #     mask = None
+        
+        # mask (saturated pixels)
+        mask_saturated = sci.data >= 4000 # kl4040 saturation level=4096 ADU (12-bit)
+    
+        # mask (edgeside)
+        edge_width = 100  # pixels
+        mask_edge = np.zeros(sci.data.shape, dtype=bool)
+        mask_edge[:edge_width, :] = True
+        mask_edge[-edge_width:, :] = True
+        mask_edge[:, :edge_width] = True
+        mask_edge[:, -edge_width:] = True    
+        
         try:
             # Bias
             bsci = ccdproc.subtract_bias(sci, mbias)
@@ -179,30 +233,44 @@ class FitsLv1:
             bdsci.meta['HISTORY'] = f"({datetime.now().isoformat()}) Dark subtracted."
             self.logger.info(f"Dark subtracted.")
             
-            # mask
-            if mask is not None:
-                bdsci.mask = mask * (bdsci.data < 0)
-                self.logger.info(f"Master mask applied.")
-            else:
-                bdsci.mask = bdsci.data < 0
-            
-            self.logger.info(f"Bad pixels masked.")
-            bdsci.data = np.nan_to_num(np.clip(bdsci.data, 0, None), nan=0.0)
-            bdsci.meta['HISTORY'] = f"({datetime.now().isoformat()}) Bad pixels masked."
-            bdsci.meta['MASKNAME'] = (mask.meta.get('FILENAME', None) if mask else None, "Master mask frame used")
-            self.logger.info(f"Bad pixels masked.")
+            # mask (negative pixels)
+            mask_negative = bdsci.data < 0
             
             # flat
-            psci = ccdproc.flat_correct(bdsci, mflat)
+            psci = ccdproc.flat_correct(bdsci, ccdmflat)
             psci.meta['FLATCORR'] = (True, "Flat corrected?")
             psci.meta['HISTORY'] = f"({datetime.now().isoformat()}) Flat corrected."
-            psci.meta['FLATNAME'] = (mflat.meta.get('FILENAME', None), "Master flat frame used")
+            psci.meta['FLATNAME'] = (ccdmflat.meta.get('FILENAME', None), "Master flat frame used")
             self.logger.info(f"Flat corrected.")
+            
+            # mask (bad pixels)
+            mask_badpix = (psci.data <= 0) | (ccdmflat.data > 2.0) | np.isnan(psci.data) | np.isinf(psci.data) 
+            
+            # mask (nearby very bright sources
+            mask_bright = self._mask_brightsource(psci.data, minarea=np.pi*12**2)
+            
+            # combine masks
+            combined_mask = mask_negative | mask_saturated | mask_edge | mask_badpix | mask_bright
+            if ccdmask is not None:
+                combined_mask |= (ccdmask.data.astype(bool))
+            if psci.mask is not None:
+                combined_mask |= psci.mask.astype(bool)
+            psci.mask = combined_mask
+            psci.data = np.nan_to_num(np.clip(psci.data, 0, None), nan=0.0) # replace negative & NaN with 0.0
+            psci.meta['HISTORY'] = f"({datetime.now().isoformat()}) Bad pixels masked."
+            psci.meta['NBADPIX'] = (np.sum(combined_mask), "Number of bad pixels masked")
+            psci.meta['MASKNAME'] = (ccdmask.meta.get('FILENAME', None) if ccdmask else None, "Master mask frame used")
+            self.logger.info(f"Bad pixel mask applied.")
         
         except Exception as e:
             self.logger.error(f"CCD processing failed: {e}")
             return
-
+        
+        # WCS header
+        if sci.wcs:
+            hdr_wcs = sci.wcs.to_header(relax=True)
+            psci.header.extend(hdr_wcs, update=True)
+        
         # Update file name
         try:
             ra   = int(round(psci.header['RACEN']))
@@ -210,11 +278,11 @@ class FitsLv1:
             pm   = 'p' if dec >= 0 else 'n'
             exp  = int(round(psci.header['EXPTIME']))
             obst = Time(psci.header['DATE-OBS']).strftime("%Y%m%d%H%M%S")
-            fname_out = f"kl4040.sci.{ra:03d}.{pm}{abs(dec):02d}.{exp:03d}.{obst}.fits"
+            fname_out = f"kl4040.sci.lv1.{ra:03d}.{pm}{abs(dec):02d}.{exp:03d}.{obst}.fits"
             psci.meta['FILENAME'] = fname_out
         except KeyError:
             self.logger.warning(f"Failed to find required header keys for naming. Using original name.")
-            fname_out = f"{fpath_fits.stem}.proc.fits"
+            fname_out = f"{fpath_fits.stem}.lv1.fits"
         
         fpath_out = outdir / fname_out
         

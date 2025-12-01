@@ -57,6 +57,8 @@ class FitsLv0:
         while 'HISTORY' in hdr:
             hdr.remove('HISTORY')
 
+        hdr.remove('ELAV') # mistaken key
+
         # --- Core metadata        
         hdr.comments['LT']  = 'Local Solar Time'
         hdr['EXPTIME']      = (float(hdr['EXPTIME']), '[sec] Exposure Time')
@@ -103,7 +105,7 @@ class FitsLv0:
         hdr['OBSCODE']      = ("G80", 'MPC Observatory Code')
         hdr['LON']          = (-119.4, '[deg] Site Longitude')
         hdr['LAT']          = ( 37.07, '[deg] Site Latitude')
-        hdr['ELEV']         = ( 1.405, '[km] Site Elevation')
+        hdr['ELEVAT']       = ( 1.405, '[km] Site Elevation')
         hdr['TELESCOP']     = ('Rowe-Ackermann Schmidt Astrograph 11-inch', 'Telescope Tube Model')
 
         # --- Processing flags

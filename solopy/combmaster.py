@@ -535,14 +535,15 @@ class CombMaster:
         
         hdr0_flat = CCDData.read(processed_flats[0]).header
         filter_name = hdr0_flat.get('FILTER', 'UNKNOWN').upper()
-        obsdate = hdr0_flat.get('OBSDATE', Time(hdr0_flat['JD'], format='jd').to_datetime().strftime('%Y%m%d'))
-        fpath_mflat = master_dir / f"{outname}.flat.{filter_name}.comb.{obsdate}.fits"
+        obsdate = datetime.now().strftime('%Y%m%d')
+        # obsdate = hdr0_flat.get('OBSDATE', Time(hdr0_flat['JD'], format='jd').to_datetime().strftime('%Y%m%d'))
+        fpath_mflat = master_dir / f"{outname}.flat.{filter_name.lower()}.comb.{obsdate}.fits"
         
         mflat.meta.update({
             'COMBINED': True,
             'NCOMBINE': len(processed_flats),
             'IMAGETYP': 'FLAT',
-            'OBSDATE': (obsdate, "YYYYMMDD (UTC)"),
+            'OBSDATE': (obsdate, "YYYYMMDD (Date file created)"),
             'OBJECT': fpath_mflat.stem,
             'FILENAME': fpath_mflat.name
         })
@@ -553,5 +554,7 @@ class CombMaster:
         hdu_mflat = fits.PrimaryHDU(data=mflat.data, header=mflat.meta)
         hdu_mflat.writeto(fpath_mflat, overwrite=True) # Save as .fits
         self.logger.info(f"Master flat saved to {fpath_mflat.name}")
+        
+        _fileutil.clear_dir(TMPDIR)
         
         return fpath_mflat
