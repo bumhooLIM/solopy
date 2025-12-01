@@ -35,7 +35,12 @@ class FitsLv1:
             file_h.setFormatter(handler.formatter)
             self.logger.addHandler(file_h)
 
-    def update_wcs(self, fpath_fits, outdir, cache_directory = "astrometry_cache", return_fpath=True):
+    def update_wcs(self,
+                   fpath_fits,
+                   outdir,
+                   cache_directory = "astrometry_cache",
+                   return_fpath=True
+                   ):
         """
         Solve for WCS and update FITS header.
         Reads .fits and writes to .wcs.fits.
@@ -131,40 +136,6 @@ class FitsLv1:
         if return_fpath:
             return outpath
 
-    def _mask_brightsource(self, data, minarea):
-        
-        # Source Extraction (sep)
-        data = data.astype(np.float32)
-        skybkg = sep.Background(data)
-        data_bkgsub = data - skybkg.back()
-        
-        source, segmap = sep.extract(
-            data_bkgsub,
-            thresh=2.5,
-            err=skybkg.globalrms,
-            minarea = minarea, # minimum area for detection
-            segmentation_map=True
-        )
-        
-        # Masking around very bright sources
-        source_bright = (source['a'] / source['b']) < 2
-        idx_bright    = np.where(source_bright)[0]       # indices in `source`
-        n_bright      = len(idx_bright)                  # number of bright sources 
-        yy, xx        = np.indices(segmap.shape)         # pixel grids
-        mask_bright   = np.zeros(segmap.shape, bool)     # mask for bright sources
-
-        # Build a circular mask around (cx,cy)
-        for idx in idx_bright:
-            label = idx + 1
-            cx, cy = source['x'][idx], source['y'][idx]
-            py, px = np.where(segmap == label)
-            d = np.hypot(px - cx, py - cy)
-            radius = d.max() + 1 #  # masking r = d + 1
-            circle_bright = (xx - cx)**2 + (yy - cy)**2 <= radius**2
-            mask_bright |= circle_bright
-            
-        return mask_bright
-
     def correct_bdf(self,
                     fpath_fits,
                     outdir,
@@ -246,11 +217,11 @@ class FitsLv1:
             # mask (bad pixels)
             mask_badpix = (psci.data <= 0) | (ccdmflat.data > 2.0) | np.isnan(psci.data) | np.isinf(psci.data) 
             
-            # mask (nearby very bright sources
-            mask_bright = self._mask_brightsource(psci.data, minarea=np.pi*12**2)
+            # mask (nearby very bright & streak-like sources)
+            mask_source = self._mask_source(psci.data)
             
             # combine masks
-            combined_mask = mask_negative | mask_saturated | mask_edge | mask_badpix | mask_bright
+            combined_mask = mask_negative | mask_saturated | mask_edge | mask_badpix | mask_source
             if ccdmask is not None:
                 combined_mask |= (ccdmask.data.astype(bool))
             if psci.mask is not None:
@@ -363,3 +334,51 @@ class FitsLv1:
             master_frame = CCDData.read(selected_file, unit='adu')
 
         return master_frame
+    
+    def _mask_source(self, data, minarea=np.pi*12**2, ratio=3, mask_bright_source = True, mask_streak_source = True):
+        
+        # Source Extraction (sep)
+        data = data.astype(np.float32)
+        skybkg = sep.Background(data)
+        data_bkgsub = data - skybkg.back()
+        
+        source, segmap = sep.extract(
+            data_bkgsub,
+            thresh=2.5,
+            err=skybkg.globalrms,
+            segmentation_map=True
+        )
+        
+        mask_bright = np.zeros_like(segmap, dtype=bool)
+        if mask_bright_source:
+            # Masking around very bright sources
+            source_bright = ((source['a'] / source['b']) < 2) & (source['npix'] >= minarea)
+            idx_bright    = np.where(source_bright)[0]       # indices in `source`
+            n_bright      = len(idx_bright)                  # number of bright sources 
+            yy, xx        = np.indices(segmap.shape)         # pixel grids
+            mask_bright   = np.zeros(segmap.shape, bool)     # mask for bright sources
+
+            # Build a circular mask around (cx,cy)
+            for idx in idx_bright:
+                label = idx + 1
+                cx, cy = source['x'][idx], source['y'][idx]
+                py, px = np.where(segmap == label)
+                d = np.hypot(px - cx, py - cy)
+                radius = d.max() + 1 #  # masking r = d + 1
+                circle_bright = (xx - cx)**2 + (yy - cy)**2 <= radius**2
+                mask_bright |= circle_bright
+        
+        # Masking streak-like sources (high a/b ratio)
+        mask_streak = np.zeros_like(segmap, dtype=bool)
+        if mask_streak_source:
+            source_streak = (source['a'] / source['b']) >= ratio
+            idx_streak = np.where(source_streak)[0]    
+            mask_streak = np.zeros_like(segmap, dtype=bool)
+            for idx in idx_streak:
+                label = idx + 1 
+                streak = segmap==label
+                mask_streak |= streak
+        
+        mask_source = mask_bright | mask_streak
+        
+        return mask_source
