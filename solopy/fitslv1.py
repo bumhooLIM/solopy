@@ -45,6 +45,8 @@ class FitsLv1:
         Solve for WCS and update FITS header.
         Reads .fits and writes to .wcs.fits.
         """
+        self.logger.info(f"Find WCS solution: {fpath_fits}")
+        
         fpath_fits = Path(fpath_fits)
         outdir = Path(outdir)
         outdir.mkdir(parents=True, exist_ok=True)
@@ -55,10 +57,10 @@ class FitsLv1:
         except ValueError:
             sci = CCDData.read(fpath_fits, unit='adu')
         except FileNotFoundError:
-            self.logger.error(f"File not found: {fpath_fits}")
+            self.logger.error(f"File not found.")
             return
         except Exception as e:
-            self.logger.error(f"Error reading FITS {fpath_fits}: {e}")
+            self.logger.error(f"Error reading FITS: {e}")
             return
 
         sci.header["LV0FILE"] = (fpath_fits.name, "Original Level-0 file name")
@@ -71,7 +73,7 @@ class FitsLv1:
             bright = objs[np.argsort(objs['flux'])[::-1][:50]]
             coords = np.vstack((bright['x'], bright['y'])).T
         except Exception as e:
-            self.logger.error(f"Source detection failed for {fpath_fits.name}: {e}")
+            self.logger.error(f"Source detection failed: {e}")
             return
 
         # Solve WCS
@@ -84,28 +86,29 @@ class FitsLv1:
                     stars=coords,
                     size_hint=astrometry.SizeHint(lower_arcsec_per_pixel=2.90, upper_arcsec_per_pixel=3.00),
                     position_hint=astrometry.PositionHint(
-                        ra_deg=sci.header["RA"], dec_deg=sci.header["DEC"], radius_deg=5.0
+                        ra_deg=sci.header["RA"], dec_deg=sci.header["DEC"], radius_deg=2.0
                     ),
                     solution_parameters=astrometry.SolutionParameters(
                         logodds_callback=lambda l: astrometry.Action.STOP if len(l)>=10 else astrometry.Action.CONTINUE,
                         sip_order=3
                     )
                 )
+                
                 if sol.has_match():
+                    wcs_solved = True
                     best = sol.best_match()
-                    self.logger.info(f"WCS match: RA={best.center_ra_deg:.5f}, DEC={best.center_dec_deg:.5f}, scale={best.scale_arcsec_per_pixel:.3f}" )
+                    self.logger.info(f"WCS match: RA={best.center_ra_deg:.2f}, DEC={best.center_dec_deg:.2f}, scale={best.scale_arcsec_per_pixel:.2f}" )
                     sci.wcs = best.astropy_wcs()
                     hdr = best.astropy_wcs().to_header(relax=True)
                     sci.header.extend(hdr, update=True)
                     sci.header['PIXSCALE'] = (best.scale_arcsec_per_pixel, "[arcsec/pixel] Pixel scale")
                     sci.header['HISTORY'] = f"({datetime.now().isoformat()}) WCS updated. (solopy.Lv1.update_wcs)"
-                    wcs_solved = True
                 else:
                     self.logger.warning(f"No WCS solution found for {fpath_fits.name}.")
         except Exception as e:
-             self.logger.warning(f"Astrometry.net solver failed for {fpath_fits.name}: {e}")
+            self.logger.warning(f"Astrometry.net solver failed for {fpath_fits.name}: {e}")
 
-        # Compute center coords (only if wcs solved)
+        # Compute center coords
         if wcs_solved:
             try:
                 cen = (sci.header['NAXIS1']//2, sci.header['NAXIS2']//2)
@@ -117,9 +120,9 @@ class FitsLv1:
                 sci.header['ALTCEN'] = (altaz.alt.value, "[deg] Center Altitude")
                 sci.header['AZCEN'] = (altaz.az.value, "[deg] Center Azimuth")
             except Exception as e:
-                self.logger.warning(f"Center coordinate calculation failed for {fpath_fits.name}: {e}")
+                self.logger.warning(f"Center coordinate calculation failed. {e}")
         else:
-            self.logger.warning(f"Skipping center coord calculation for {fpath_fits.name} (no WCS).")
+            self.logger.warning(f"Skipping center coord calculation (no WCS).")
 
         # Save output file
         out_name = f"{fpath_fits.stem}.wcs.fits"
@@ -255,6 +258,9 @@ class FitsLv1:
             self.logger.warning(f"Failed to find required header keys for naming. Using original name.")
             fname_out = f"{fpath_fits.stem}.lv1.fits"
         
+        # Update meta data
+        psci.meta['DATLEVEL'] = 1
+        
         fpath_out = outdir / fname_out
         
         # Save as Multi-Extension FITS
@@ -269,9 +275,9 @@ class FitsLv1:
         
         try:
             hdul_out.writeto(fpath_out, overwrite=True)
-            self.logger.info(f"Preprocessing complete: {fname_out}")
+            self.logger.info(f"Preprocessing completed: {fpath_out.name}")
         except Exception as e:
-            self.logger.error(f"Failed to write file {fpath_out}: {e}")
+            self.logger.error(f"Failed to write file: {e}")
             return
             
         if return_fpath:
