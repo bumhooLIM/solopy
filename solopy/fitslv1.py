@@ -283,6 +283,8 @@ class FitsLv1:
         if return_fpath:
             return fpath_out
 
+    # def zp_calculation(self,
+
     def _select_master(self, masterdir, imagetyp, jd_target, exptime=None):
         """
         Helper to select the closest master frame by JD (and exposure time if given).
