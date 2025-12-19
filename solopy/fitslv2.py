@@ -312,7 +312,7 @@ class FitsLv2:
 
         # 7. Update Header and Save
         hdr['ZP'] = (zp, 'Photometric Zero Point (mag)')
-        hdr['ZPSTD'] = (zp_std, 'Zero Point Standard Deviation')
+        hdr['ZPERR'] = (zp_std, 'Zero Point Standard Deviation')
         hdr['HISTORY'] = f"({datetime.now().isoformat()}) Level-2 processing: Photometry & ZP calculated."
         
         if outdir:
