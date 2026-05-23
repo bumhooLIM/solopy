@@ -113,7 +113,7 @@ class FitsLv1:
             try:
                 cen = (sci.header['NAXIS1']//2, sci.header['NAXIS2']//2)
                 sky = sci.wcs.pixel_to_world(*cen)
-                loc = EarthLocation(lat=sci.header['LAT']*u.deg, lon=sci.header['LON']*u.deg, height=sci.header['ELEV']*u.km)
+                loc = EarthLocation(lat=sci.header['LAT']*u.deg, lon=sci.header['LON']*u.deg, height=sci.header['ELEVAT']*u.km)
                 altaz = sky.transform_to(AltAz(obstime=Time(sci.header['JD'], format='jd'), location=loc))
                 sci.header['RACEN'] = (sky.ra.value, "[deg] Center Right Ascension")
                 sci.header['DECCEN'] = (sky.dec.value, "[deg] Center Declination")

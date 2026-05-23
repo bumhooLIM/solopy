@@ -57,7 +57,7 @@ class FitsLv0:
         while 'HISTORY' in hdr:
             hdr.remove('HISTORY')
 
-        hdr.remove('ELAV') # mistaken key
+        hdr.remove('ELAV') if 'ELAV' in hdr else None # mistaken key
 
         # --- Core metadata        
         hdr.comments['LT']  = 'Local Solar Time'
@@ -89,7 +89,7 @@ class FitsLv0:
         # --- Detector properties
         hdr['INSTRUME']     = ('FLI KL4040FI', 'Camera Model')
         hdr['DETECTOR']     = ('GSENSE4040 FI', 'CMOS Detector')
-        hdr['EGAIN']        = (25.0, '[e-/ADU] Effective Gain')
+        hdr['EGAIN']        = (18.69, '[e-/ADU] Effective Gain')
         hdr['RDNOISE']      = (3.7, '[e-/pix] Readout Noise')
         
         # --- Telescope & Site
