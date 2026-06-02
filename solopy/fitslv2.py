@@ -12,12 +12,13 @@ from ccdproc import CCDData
 from scipy.spatial import cKDTree
 from photutils.aperture import CircularAperture, CircularAnnulus, aperture_photometry, ApertureStats
 from . import _utils
-
+from astropy.wcs import WCS
 from astropy.time import Time
 import astropy.units as u
 from astroquery.imcce import Skybot
 import pandas as pd
 import numpy as np
+
 class FitsLv2:
     """
     Class for Level-2 processing (Photometry and Zero Point Calculation).
@@ -35,119 +36,6 @@ class FitsLv2:
             file_h = logging.FileHandler(log_file)
             file_h.setFormatter(handler.formatter)
             self.logger.addHandler(file_h)
-
-    def query_gaia(self,
-                   wcs,
-                   hdr,
-                   gaia_data,
-                   gaia_mag_upper_limit=18.0,
-                   gaia_mag_lower_limit=13.0,
-                   gaia_band="g",
-                   filter_nearby_sources=True,
-                   dist_thresh_pix=15,
-                   bright_star_dist_thresh_pix=50
-                   ):
-        """
-        Query Gaia catalog for sources within the field of view.
-        """
-        if isinstance(gaia_data, (str, Path)):
-            try:
-                gaia_all = np.load(gaia_data, mmap_mode='r')
-            except Exception as e:
-                self.logger.error(f"Failed to load Gaia catalog from {gaia_data}: {e}")
-                return None
-        else:
-            gaia_all = gaia_data
-
-        # Filter FoV
-        nx = hdr['NAXIS1']
-        ny = hdr['NAXIS2']
-        
-        corners_x = [0, nx, nx, 0]
-        corners_y = [0, 0, ny, ny]
-        corners_world = wcs.pixel_to_world(corners_x, corners_y)
-        
-        ra_min = corners_world.ra.degree.min()
-        ra_max = corners_world.ra.degree.max()
-        dec_min = corners_world.dec.degree.min()
-        dec_max = corners_world.dec.degree.max()
-
-        # Add a small buffer (e.g., 0.1 degrees) to account for spherical projection bowing.
-        # The edges of a FOV bow outward slightly on a sphere; the corners alone 
-        # might barely miss sources situated exactly in the middle of an edge.
-        buffer = 0.1 
-        
-        # Handle RA wrap-around (crossing 0/360 degrees)
-        if (ra_max - ra_min) > 180:
-            # The FOV crosses the RA=0 meridian. We must mask differently.
-            mask_region = (
-                ((gaia_all['ra'] >= ra_max - buffer) | (gaia_all['ra'] <= ra_min + buffer)) &
-                (gaia_all['dec'] >= dec_min - buffer) & 
-                (gaia_all['dec'] <= dec_max + buffer)
-            )
-        else:
-            # Standard masking
-            mask_region = (
-                (gaia_all['ra'] >= ra_min - buffer) & (gaia_all['ra'] <= ra_max + buffer) &
-                (gaia_all['dec'] >= dec_min - buffer) & (gaia_all['dec'] <= dec_max + buffer)
-            )
-        
-        gaia_region_all = gaia_all[mask_region]
-        
-        # Convert ALL FOV sources to pixel coordinates
-        skycoord_gaia = SkyCoord(gaia_region_all["ra"]*u.degree, gaia_region_all["dec"]*u.degree)
-        x_all, y_all = wcs.world_to_pixel(skycoord_gaia)
-        
-        df_gaia = pd.DataFrame(gaia_region_all)
-        df_gaia['x'] = x_all
-        df_gaia['y'] = y_all
-        
-        # 1. Filter (x, y) cordinates within the bounds of the image
-        # (with a small buffer to catch edge sources)
-        img_buffer = 10  # pixels
-        mask_img = (
-            (df_gaia['x'] >= -img_buffer) & (df_gaia['x'] <= nx + img_buffer) &
-            (df_gaia['y'] >= -img_buffer) & (df_gaia['y'] <= ny + img_buffer)
-        )
-        df_gaia = df_gaia[mask_img].reset_index(drop=True).copy()
-
-        # Identify bright stars for masking
-        mag_col = f'phot_{gaia_band}_mean_mag'
-        bright_stars = df_gaia[df_gaia[mag_col] <= gaia_mag_lower_limit]
-
-        # Filter 2: Magnitude Range
-        mask_target = (df_gaia[mag_col] > gaia_mag_lower_limit) & (df_gaia[mag_col] < gaia_mag_upper_limit)
-        df_target = df_gaia[mask_target].copy()
-        
-        if not filter_nearby_sources or df_target.empty:
-            self.logger.info(f"Gaia catalog: Found {len(df_target)} sources in FOV (no spatial filtering applied.)")
-            return df_target
-
-        # Filter 3: Mask sources too close to EACH OTHER
-        coords_target = np.vstack([df_target['x'], df_target['y']]).T
-        tree_target = cKDTree(coords_target)
-        dists_all, _ = tree_target.query(coords_target, k=2, workers=-1)
-        
-        # Distances to the nearest neighbor (index 1, since index 0 is the point itself)
-        mask_dist_nearest = dists_all[:, 1] >= dist_thresh_pix
-        
-        # Filter 4: Mask sources too close to VERY BRIGHT STARS
-        if not bright_stars.empty:
-            coords_bright = np.vstack([bright_stars['x'], bright_stars['y']]).T
-            tree_bright = cKDTree(coords_bright)
-            
-            # Find distance from each target star to the nearest bright star
-            dists_to_bright, _ = tree_bright.query(coords_target, k=1, workers=-1)
-            mask_dist_nearbright = dists_to_bright >= bright_star_dist_thresh_pix
-        else:
-            mask_dist_nearbright = np.ones(len(df_target), dtype=bool)
-
-        # Combine spatial masks and return
-        final_mask = mask_dist_nearest & mask_dist_nearbright
-        
-        self.logger.info(f"Gaia catalog: Found {np.sum(final_mask)} sources in FOV")
-        
-        return df_target[final_mask].reset_index(drop=True)
 
     def detect_sources(self, data, mask=None, fwhm=2.0, thresh=2.5):
         """
