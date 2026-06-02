@@ -182,7 +182,7 @@ class FitsLv1:
         #     mask = None
         
         # mask (saturated pixels)
-        mask_saturated = sci.data >= 4000 # kl4040 saturation level=4096 ADU (12-bit)
+        mask_saturated = sci.data >= 3800 # kl4040 saturation level=4096 ADU (12-bit)
     
         # mask (edgeside)
         edge_width = 100  # pixels
