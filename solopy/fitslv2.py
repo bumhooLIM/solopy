@@ -21,7 +21,7 @@ import numpy as np
 
 class FitsLv2:
     """
-    Class for Level-2 processing (Photometry and Zero Point Calculation).
+    Class for Level-2 processing (Photometric Zero Point Calculation).
     Assumes all inputs are uncompressed .fits files.
     """
 
@@ -37,7 +37,13 @@ class FitsLv2:
             file_h.setFormatter(handler.formatter)
             self.logger.addHandler(file_h)
 
-    def detect_sources(self, data, mask=None, fwhm=2.0, thresh=2.5):
+    def sep_extract_source(self,
+                           data,
+                           mask=None,
+                           fwhm=2.0,
+                           thresh=2.5,
+                           col_out="all"
+                           ):
         """
         Detect sources using SEP.
         """
@@ -57,6 +63,13 @@ class FitsLv2:
                 mask=mask,
                 minarea=np.pi*(0.5*fwhm)**2
             )
+            
+            if len(objects) == 0:
+                self.logger.warning("SEP: No sources detected.")
+                return pd.DataFrame()
+            
+            if col_out != "all":
+                objects = objects[col_out]
             
             self.logger.info(f"SEP: Detected {len(objects)} sources with SEP.")
             return pd.DataFrame(objects)
@@ -203,6 +216,7 @@ class FitsLv2:
 
             # 5. Math and Columns
             ap_area = aperture.area
+            phot_table['r_ap_pixel'] = r_ap
             phot_table['aperture_area']  = ap_area
             phot_table['annulus_median'] = msky
             phot_table['bkg_std']        = ssky
@@ -340,7 +354,7 @@ class FitsLv2:
 
         # 3. Detect Sources
         self.logger.info("Detecting sources...")
-        source_cat, data_sub = self.detect_sources(ccd.data, mask=ccd.mask)
+        source_cat, data_sub = self.sep_extract_source(ccd.data, mask=ccd.mask)
         if source_cat is None or len(source_cat) == 0:
             self.logger.warning("No sources detected in image.")
             return
