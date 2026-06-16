@@ -188,12 +188,13 @@ class GaiaQuery:
         buffer = 0.1  # degrees
         corners_x = [0, nx, nx, 0]
         corners_y = [0, 0, ny, ny]
-        corners_world = wcs.pixel_to_world(corners_x, corners_y)
+        # corners_world = wcs.pixel_to_world(corners_x, corners_y)
+        ra_corners, dec_corners = wcs.pixel_to_world_values(corners_x, corners_y)
         
-        ra_min = corners_world.ra.degree.min()
-        ra_max = corners_world.ra.degree.max()
-        dec_min = corners_world.dec.degree.min()
-        dec_max = corners_world.dec.degree.max()
+        ra_min = ra_corners.min()
+        ra_max = ra_corners.max()
+        dec_min = dec_corners.min()
+        dec_max = dec_corners.max()
 
         if (ra_max - ra_min) > 180:
             mask_region = (
@@ -213,8 +214,9 @@ class GaiaQuery:
             return pd.DataFrame()
 
         # 4. Convert to pixel coordinates
-        skycoord_gaia = SkyCoord(gaia_region_all["ra"]*u.degree, gaia_region_all["dec"]*u.degree)
-        x_all, y_all = wcs.world_to_pixel(skycoord_gaia)
+        # skycoord_gaia = SkyCoord(gaia_region_all["ra"]*u.degree, gaia_region_all["dec"]*u.degree)
+        # x_all, y_all = wcs.world_to_pixel(skycoord_gaia)
+        x_all, y_all = wcs.world_to_pixel_values(gaia_region_all['ra'], gaia_region_all['dec'])
         
         df_gaia = pd.DataFrame(gaia_region_all)
         df_gaia['x'] = x_all

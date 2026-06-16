@@ -37,7 +37,7 @@ class soloPSF:
         
         # 1. SEP Strict Data Formatting
         # SEP requires C-contiguous, native byte-order float arrays.
-        data = ccd_cutout.data.data # Ensure we get a numpy array, not a masked array
+        data = np.ma.getdata(ccd_cutout.data)
         if data.dtype.byteorder == '>':
                 data = data.byteswap().view(data.dtype.newbyteorder())
         data = data.astype(np.float32)
