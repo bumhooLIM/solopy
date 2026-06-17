@@ -217,7 +217,7 @@ class FitsLv3:
                 continue
             
             # 7. Metadata Injection
-            for col in ['exptime', 'filename', 'obsdate', 'altcen', 'azcen', 'zpfile', 'psffile']:
+            for col in ['object','exptime', 'filename', 'obsdate', 'altcen', 'azcen', 'zpfile', 'psffile']:
                 sso_phot_obsid[col] = row.get(col, np.nan)
                 
             sso_phot_obsid['zp_global'] = row.get('zp_g', np.nan)
