@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solopy"
-version = "0.1.0"
+version = "1.0.0"
 description = "Astronomy convinient tools"
 authors = [{ name = "Bumhoo Lim", email = "bumhoo7@snu.ac.kr" }]
 readme = "README.md"
