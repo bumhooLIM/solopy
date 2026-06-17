@@ -128,57 +128,11 @@ class FitsLv2:
 
         return matched_df
 
-    # def find_centroid(self, data, sources, fwhm=2.0, mask=None,
-    #                   x_col='x', y_col='y'):
-    #     """
-    #     Perform background subtraction and calculate highly accurate windowed 
-    #     centroids for a given source catalog.
-    #     """
-    #     try:
-    #         # 1. Prepare the data (NumPy 2.0 compatible byte-swapping)
-    #         if data.dtype.byteorder == '>':
-    #             data = data.byteswap().view(data.dtype.newbyteorder())
-    #         data = data.astype(np.float32)
-
-    #         # 2. Global Background Subtraction
-    #         # Mask is passed to prevent bright stars/bad pixels from skewing the background
-    #         bkg = sep.Background(data, mask=mask)
-    #         data_bkgsub = data - bkg.back()
-            
-    #         # 3. Calculate Windowed Centroids
-    #         x_cen, y_cen, flag = sep.winpos(
-    #             data_bkgsub, 
-    #             sources[x_col].values, 
-    #             sources[y_col].values, 
-    #             sig=fwhm/2.355
-    #         )
-
-    #         # 4. Apply new coordinates and flags to the catalog
-    #         updated_sources = sources.copy()
-    #         updated_sources['x_winpos'] = x_cen
-    #         updated_sources['y_winpos'] = y_cen
-    #         updated_sources['winpos_flag'] = flag
-
-    #         # 5. Filter out bad centroids
-    #         good_mask = (flag == 0)
-    #         final_sources = updated_sources[good_mask].reset_index(drop=True)
-
-    #         # Log the cleanup
-    #         bad_count = len(sources) - len(final_sources)
-    #         if bad_count > 0:
-    #             self.logger.info(f"SEP: Removed {bad_count} sources with centroiding errors.")
-
-    #         self.logger.info(f"SEP: Calculated windowed centroids for {len(final_sources)} sources.")
-    #         return final_sources
-
-    #     except Exception as e:
-    #         self.logger.error(f"SEP: Centroiding failed: {e}")
-    #         return None
-
-    def find_centroid(self, data, sources, cutout_size=15, mask=None, x_col='x', y_col='y'):
+    def find_centroid(self, data, sources, fwhm=2.0, mask=None,
+                      x_col='x', y_col='y'):
         """
-        Perform background subtraction and calculate highly accurate centroids 
-        robust against elongated sources (tracking errors).
+        Perform background subtraction and calculate highly accurate windowed 
+        centroids for a given source catalog.
         """
         try:
             # 1. Prepare the data (NumPy 2.0 compatible byte-swapping)
@@ -187,63 +141,109 @@ class FitsLv2:
             data = data.astype(np.float32)
 
             # 2. Global Background Subtraction
+            # Mask is passed to prevent bright stars/bad pixels from skewing the background
             bkg = sep.Background(data, mask=mask)
             data_bkgsub = data - bkg.back()
             
-            updated_sources = sources.copy()
-            new_x, new_y = [], []
-            flags = []
+            # 3. Calculate Windowed Centroids
+            x_cen, y_cen, flag = sep.winpos(
+                data_bkgsub, 
+                sources[x_col].values, 
+                sources[y_col].values, 
+                sig=fwhm/2.355
+            )
 
-            # 3. Calculate Robust Centroids via Cutouts
-            # box_size should be large enough to encapsulate the full streak length.
-            for idx, row in updated_sources.iterrows():
-                init_x, init_y = row[x_col], row[y_col]
-                
-                try:
-                    # Create a 2D cutout around the initial guess
-                    cutout = Cutout2D(data_bkgsub, (init_x, init_y), cutout_size)
-                    
-                    # OPTION 1: 1D Marginal Gaussian Fit (Highly recommended for streaks)
-                    # It collapses the streak into 1D profiles, ignoring the asymmetric 2D shape
-                    xcen_cutout, ycen_cutout = centroid_1dg(cutout.data)
-                    
-                    # If 1D Gaussian fails (e.g., too noisy), fallback to Center of Mass
-                    if np.isnan(xcen_cutout) or np.isnan(ycen_cutout):
-                        xcen_cutout, ycen_cutout = centroid_com(cutout.data)
-
-                    # Convert cutout coordinates back to original image coordinates
-                    x_final, y_final = cutout.to_original_position((xcen_cutout, ycen_cutout))
-                    
-                    new_x.append(x_final)
-                    new_y.append(y_final)
-                    flags.append(0) # Success flag
-
-                except Exception:
-                    # Cutout failed (e.g., star too close to the edge of the sensor)
-                    new_x.append(init_x)
-                    new_y.append(init_y)
-                    flags.append(1) # Bad flag
-                    
             # 4. Apply new coordinates and flags to the catalog
-            updated_sources['x_winpos'] = new_x # Keeping your column name for pipeline continuity
-            updated_sources['y_winpos'] = new_y
-            updated_sources['winpos_flag'] = flags
+            updated_sources = sources.copy()
+            updated_sources['x_winpos'] = x_cen
+            updated_sources['y_winpos'] = y_cen
+            updated_sources['winpos_flag'] = flag
 
             # 5. Filter out bad centroids
-            good_mask = (updated_sources['winpos_flag'] == 0)
+            good_mask = (flag == 0)
             final_sources = updated_sources[good_mask].reset_index(drop=True)
 
             # Log the cleanup
             bad_count = len(sources) - len(final_sources)
             if bad_count > 0:
-                self.logger.info(f"Centroiding: Removed {bad_count} sources due to edge proximity or noise.")
+                self.logger.info(f"SEP: Removed {bad_count} sources with centroiding errors.")
 
-            self.logger.info(f"Centroiding: Calculated robust centroids for {len(final_sources)} sources.")
+            self.logger.info(f"SEP: Calculated windowed centroids for {len(final_sources)} sources.")
             return final_sources
 
         except Exception as e:
-            self.logger.error(f"Centroiding failed: {e}")
+            self.logger.error(f"SEP: Centroiding failed: {e}")
             return None
+
+    # def find_centroid(self, data, sources, cutout_size=15, mask=None, x_col='x', y_col='y'):
+    #     """
+    #     Perform background subtraction and calculate highly accurate centroids 
+    #     robust against elongated sources (tracking errors).
+    #     """
+    #     try:
+    #         # 1. Prepare the data (NumPy 2.0 compatible byte-swapping)
+    #         if data.dtype.byteorder == '>':
+    #             data = data.byteswap().view(data.dtype.newbyteorder())
+    #         data = data.astype(np.float32)
+
+    #         # 2. Global Background Subtraction
+    #         bkg = sep.Background(data, mask=mask)
+    #         data_bkgsub = data - bkg.back()
+            
+    #         updated_sources = sources.copy()
+    #         new_x, new_y = [], []
+    #         flags = []
+
+    #         # 3. Calculate Robust Centroids via Cutouts
+    #         # box_size should be large enough to encapsulate the full streak length.
+    #         for idx, row in updated_sources.iterrows():
+    #             init_x, init_y = row[x_col], row[y_col]
+                
+    #             try:
+    #                 # Create a 2D cutout around the initial guess
+    #                 cutout = Cutout2D(data_bkgsub, (init_x, init_y), cutout_size)
+                    
+    #                 # OPTION 1: 1D Marginal Gaussian Fit (Highly recommended for streaks)
+    #                 # It collapses the streak into 1D profiles, ignoring the asymmetric 2D shape
+    #                 xcen_cutout, ycen_cutout = centroid_1dg(cutout.data)
+                    
+    #                 # If 1D Gaussian fails (e.g., too noisy), fallback to Center of Mass
+    #                 if np.isnan(xcen_cutout) or np.isnan(ycen_cutout):
+    #                     xcen_cutout, ycen_cutout = centroid_com(cutout.data)
+
+    #                 # Convert cutout coordinates back to original image coordinates
+    #                 x_final, y_final = cutout.to_original_position((xcen_cutout, ycen_cutout))
+                    
+    #                 new_x.append(x_final)
+    #                 new_y.append(y_final)
+    #                 flags.append(0) # Success flag
+
+    #             except Exception:
+    #                 # Cutout failed (e.g., star too close to the edge of the sensor)
+    #                 new_x.append(init_x)
+    #                 new_y.append(init_y)
+    #                 flags.append(1) # Bad flag
+                    
+    #         # 4. Apply new coordinates and flags to the catalog
+    #         updated_sources['x_winpos'] = new_x # Keeping your column name for pipeline continuity
+    #         updated_sources['y_winpos'] = new_y
+    #         updated_sources['winpos_flag'] = flags
+
+    #         # 5. Filter out bad centroids
+    #         good_mask = (updated_sources['winpos_flag'] == 0)
+    #         final_sources = updated_sources[good_mask].reset_index(drop=True)
+
+    #         # Log the cleanup
+    #         bad_count = len(sources) - len(final_sources)
+    #         if bad_count > 0:
+    #             self.logger.info(f"Centroiding: Removed {bad_count} sources due to edge proximity or noise.")
+
+    #         self.logger.info(f"Centroiding: Calculated robust centroids for {len(final_sources)} sources.")
+    #         return final_sources
+
+    #     except Exception as e:
+    #         self.logger.error(f"Centroiding failed: {e}")
+    #         return None
     
     
     def perform_photometry(self,

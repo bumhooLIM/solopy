@@ -99,7 +99,8 @@ class FitsLv1:
                     solution_parameters=astrometry.SolutionParameters(
                         logodds_callback=lambda l: astrometry.Action.STOP if len(l)>=10 else astrometry.Action.CONTINUE,
                         sip_order=3
-                    )
+                    ),
+                    
                 )
                 
                 if sol.has_match():
