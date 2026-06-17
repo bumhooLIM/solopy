@@ -264,6 +264,10 @@ class FitsLv2:
         """
         try:
             # 1. Map Sources to Regional FWHM
+            if sources.empty:
+                    self.logger.warning("No sources provided for photometry.")  
+                    return pd.DataFrame()
+            
             if psf_table is not None and not psf_table.empty:
                 regions = SOLORegion(data.shape, base_tile_size=base_tile_size)
                 
@@ -654,98 +658,98 @@ class FitsLv2:
             
         return True
 
-    def find_asteroids_in_fov(self, wcs, hdr, mag_upper_limit=18.0):
-        """
-        Query SkyBoT (IMCCE) for all known minor planets within the FITS Field of View.
-        """
-        try:
-            # 1. Parse Time from Header
-            # Assumes hdr['jd'] is a float Julian Date
-            epoch = Time(hdr['jd'], format='jd')
+    # def find_asteroids_in_fov(self, wcs, hdr, mag_upper_limit=18.0):
+    #     """
+    #     Query SkyBoT (IMCCE) for all known minor planets within the FITS Field of View.
+    #     """
+    #     try:
+    #         # 1. Parse Time from Header
+    #         # Assumes hdr['jd'] is a float Julian Date
+    #         epoch = Time(hdr['jd'], format='jd')
 
-            # 2. Determine FOV Center and Radius
-            nx = hdr['NAXIS1']
-            ny = hdr['NAXIS2']
+    #         # 2. Determine FOV Center and Radius
+    #         nx = hdr['NAXIS1']
+    #         ny = hdr['NAXIS2']
 
-            # Find the center of the image
-            center_x, center_y = nx / 2, ny / 2
-            center_world = wcs.pixel_to_world(center_x, center_y)
+    #         # Find the center of the image
+    #         center_x, center_y = nx / 2, ny / 2
+    #         center_world = wcs.pixel_to_world(center_x, center_y)
 
-            # Find max radius to the corners to ensure the cone covers the whole rectangle
-            corners_x = [0, nx, nx, 0]
-            corners_y = [0, 0, ny, ny]
-            corners_world = wcs.pixel_to_world(corners_x, corners_y)
+    #         # Find max radius to the corners to ensure the cone covers the whole rectangle
+    #         corners_x = [0, nx, nx, 0]
+    #         corners_y = [0, 0, ny, ny]
+    #         corners_world = wcs.pixel_to_world(corners_x, corners_y)
             
-            # The radius of our search cone is the distance from center to the furthest corner
-            search_radius = np.max(center_world.separation(corners_world))
+    #         # The radius of our search cone is the distance from center to the furthest corner
+    #         search_radius = np.max(center_world.separation(corners_world))
 
-            self.logger.info(f"Querying SkyBoT at {epoch.isot} with radius {search_radius.to(u.deg):.2f}...")
+    #         self.logger.info(f"Querying SkyBoT at {epoch.isot} with radius {search_radius.to(u.deg):.2f}...")
 
-            # 3. Query SkyBoT
-            # Skybot natively returns a rich Astropy QTable
-            results = Skybot.cone_search(center_world, search_radius, epoch)
+    #         # 3. Query SkyBoT
+    #         # Skybot natively returns a rich Astropy QTable
+    #         results = Skybot.cone_search(center_world, search_radius, epoch)
             
-            if results is None or len(results) == 0:
-                self.logger.info("No asteroids found in this FOV.")
-                return pd.DataFrame()
+    #         if results is None or len(results) == 0:
+    #             self.logger.info("No asteroids found in this FOV.")
+    #             return pd.DataFrame()
 
-            # Convert to Pandas for easier manipulation downstream
-            df_ast = results.to_pandas()
+    #         # Convert to Pandas for easier manipulation downstream
+    #         df_ast = results.to_pandas()
 
-            # 4. Filter by Magnitude
-            # Skybot returns the predicted V-band magnitude in the 'V' column
-            df_ast = df_ast[df_ast['V'] <= mag_upper_limit].copy()
+    #         # 4. Filter by Magnitude
+    #         # Skybot returns the predicted V-band magnitude in the 'V' column
+    #         df_ast = df_ast[df_ast['V'] <= mag_upper_limit].copy()
 
-            if df_ast.empty:
-                self.logger.info(f"No asteroids brighter than {mag_upper_limit} mag found.")
-                return df_ast
+    #         if df_ast.empty:
+    #             self.logger.info(f"No asteroids brighter than {mag_upper_limit} mag found.")
+    #             return df_ast
 
-            # 5. Calculate Pixel Coordinates
-            coords = SkyCoord(df_ast['RA']*u.deg, df_ast['DEC']*u.deg)
-            x, y = wcs.world_to_pixel(coords)
-            df_ast['x_pixel'] = x
-            df_ast['y_pixel'] = y
+    #         # 5. Calculate Pixel Coordinates
+    #         coords = SkyCoord(df_ast['RA']*u.deg, df_ast['DEC']*u.deg)
+    #         x, y = wcs.world_to_pixel(coords)
+    #         df_ast['x_pixel'] = x
+    #         df_ast['y_pixel'] = y
 
-            # 6. Strict Rectangular Masking
-            # Skybot queries a circle. We must trim off the corners that fall outside the CCD.
-            in_fov_mask = (
-                (df_ast['x_pixel'] >= 0) & (df_ast['x_pixel'] <= nx) &
-                (df_ast['y_pixel'] >= 0) & (df_ast['y_pixel'] <= ny)
-            )
-            df_ast = df_ast[in_fov_mask].reset_index(drop=True)
+    #         # 6. Strict Rectangular Masking
+    #         # Skybot queries a circle. We must trim off the corners that fall outside the CCD.
+    #         in_fov_mask = (
+    #             (df_ast['x_pixel'] >= 0) & (df_ast['x_pixel'] <= nx) &
+    #             (df_ast['y_pixel'] >= 0) & (df_ast['y_pixel'] <= ny)
+    #         )
+    #         df_ast = df_ast[in_fov_mask].reset_index(drop=True)
 
-            if df_ast.empty:
-                self.logger.info("Asteroids found, but they fell outside the CCD rectangle.")
-                return df_ast
+    #         if df_ast.empty:
+    #             self.logger.info("Asteroids found, but they fell outside the CCD rectangle.")
+    #             return df_ast
 
 
-            # 8. Clean up and rename columns for sanity
-            rename_map = {
-                'Name': 'name',
-                'Number': 'number',
-                'RA': 'ra',
-                'DEC': 'dec',
-                'V': 'mag_v_pred',    # Predicted V magnitude
-                'r': 'r_hel_au',      # Heliocentric distance
-                'delta': 'delta_geo_au', # Geocentric distance
-                'alpha': 'phase_angle',  
-                'elong': 'solar_elong'
-            }
-            df_ast.rename(columns=rename_map, inplace=True)
+    #         # 8. Clean up and rename columns for sanity
+    #         rename_map = {
+    #             'Name': 'name',
+    #             'Number': 'number',
+    #             'RA': 'ra',
+    #             'DEC': 'dec',
+    #             'V': 'mag_v_pred',    # Predicted V magnitude
+    #             'r': 'r_hel_au',      # Heliocentric distance
+    #             'delta': 'delta_geo_au', # Geocentric distance
+    #             'alpha': 'phase_angle',  
+    #             'elong': 'solar_elong'
+    #         }
+    #         df_ast.rename(columns=rename_map, inplace=True)
 
-            # Select and order the columns of interest
-            cols_to_keep = [
-                'name', 'number', 'ra', 'dec', 'x_pixel', 'y_pixel', 
-                'mag_v_pred', 'r_hel_au', 'delta_geo_au', 'phase_angle', 
-                'solar_elong',
-            ]
+    #         # Select and order the columns of interest
+    #         cols_to_keep = [
+    #             'name', 'number', 'ra', 'dec', 'x_pixel', 'y_pixel', 
+    #             'mag_v_pred', 'r_hel_au', 'delta_geo_au', 'phase_angle', 
+    #             'solar_elong',
+    #         ]
             
-            # Ensure we only try to keep columns that actually exist (failsafe)
-            final_cols = [c for c in cols_to_keep if c in df_ast.columns]
+    #         # Ensure we only try to keep columns that actually exist (failsafe)
+    #         final_cols = [c for c in cols_to_keep if c in df_ast.columns]
             
-            self.logger.info(f"Successfully tracked {len(df_ast)} asteroids in FOV.")
-            return df_ast[final_cols]
+    #         self.logger.info(f"Successfully tracked {len(df_ast)} asteroids in FOV.")
+    #         return df_ast[final_cols]
 
-        except Exception as e:
-            self.logger.error(f"Asteroid FoV search failed: {e}")
-            return pd.DataFrame()
+    #     except Exception as e:
+    #         self.logger.error(f"Asteroid FoV search failed: {e}")
+    #         return pd.DataFrame()

@@ -107,7 +107,7 @@ class FitsLv0:
                 
                 # Safe path stem extraction
                 obj_name = str(hdr.get('OBJECT', 'Unknown'))
-                hdr["OBJECT"]   = (Path(obj_name).stem, 'Target Object')
+                hdr["OBJECT"]   = (obj_name.split('\\')[-1].strip(), 'Target Object')
 
                 # --- Time information
                 time_str = str(hdr.get('UTC-END', hdr.get('UTC', ''))).strip()
