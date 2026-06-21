@@ -122,7 +122,7 @@ class FitsLv3:
         self.logger.info(f"Successfully predicted {len(eph_all)} total asteroid appearances.")
         return eph_all
 
-    def extract_sso_photometry(self, science_summary, eph, psf_dir, base_tile_size=500):
+    def extract_sso_photometry(self, science_summary, eph, psf_dir, ap_in_out=(1.5, 3.0, 4.0), base_tile_size=500):
         """
         Executes precision centroiding and spatially varying aperture photometry
         for the predicted asteroids in each frame.
@@ -151,8 +151,8 @@ class FitsLv3:
                     wcs = WCS(hdr)
                     mask = hdul[1].data.astype(bool) if len(hdul) > 1 else np.zeros_like(data, dtype=bool)
                     
-                    egain = float(hdr.get("EGAIN", 1.0))
-                    rdnoise = float(hdr.get("RDNOISE", 0.0))
+                    egain = float(hdr.get("EGAIN", 18.69))
+                    rdnoise = float(hdr.get("RDNOISE", 3.9))
                     
                     safe_data = np.maximum(data, 0)
                     err = np.sqrt(safe_data / egain + (rdnoise / egain)**2)
@@ -209,7 +209,7 @@ class FitsLv3:
                 fwhm=fwhm_global,
                 psf_table=psf_table,
                 base_tile_size=base_tile_size,
-                ap_in_out=(3.0, 4.0, 6.0),
+                ap_in_out=ap_in_out,
                 x_col='x_winpos', y_col='y_winpos'
             )
             
