@@ -97,7 +97,7 @@ class CombMaster:
             self.logger.info(f"Searching for closest master bias to JD={target_jd:.1f}...")
     
         try:
-            mbias_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits').filter(imagetyp='BIAS')
+            mbias_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits', glob_exclude='*._*.fits').filter(imagetyp='BIAS')
             if not mbias_coll.files:
                 self.logger.error(f"No master bias found in {master_dir}.")
                 return None, None
@@ -153,7 +153,7 @@ class CombMaster:
             self.logger.info(f"Searching for closest master dark to JD={target_jd:.1f}, exp={target_exptime:.1f}s...")
         
         try:
-            mdark_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits').filter(imagetyp='DARK')
+            mdark_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits', glob_exclude='*._*.fits').filter(imagetyp='DARK')
             if not mdark_coll.files:
                 self.logger.warning(f"No master darks found in {master_dir}.")
                 return None, None
