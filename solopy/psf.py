@@ -145,7 +145,7 @@ class soloPSF:
             y_center, x_center = psf_data.shape[0] / 2, psf_data.shape[1] / 2
             
             init_guess = Gaussian2D(
-                amplitude=np.max(psf_data),
+                amplitude=np.nanmax(psf_data),
                 x_mean=x_center, y_mean=y_center,
                 x_stddev=self.init_fwhm/2.355, y_stddev=self.init_fwhm/2.355,
                 theta=0
