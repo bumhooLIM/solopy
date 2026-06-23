@@ -42,6 +42,7 @@ class FitsLv1:
                    fpath_fits,
                    outdir,
                    cache_directory="astrometry_cache",
+                   verbose=False,
                    return_fpath=True):
         """
         Solve for WCS and update FITS header.
@@ -50,6 +51,9 @@ class FitsLv1:
         fpath_fits = Path(fpath_fits)
         outdir = Path(outdir)
         outdir.mkdir(parents=True, exist_ok=True)
+
+        astrometry_logger = logging.getLogger("astrometry")
+        astrometry_logger.setLevel(logging.INFO if verbose else logging.WARNING)
         
         self.logger.info(f"Find WCS solution: {fpath_fits.name}")
 
@@ -100,7 +104,6 @@ class FitsLv1:
                         logodds_callback=lambda l: astrometry.Action.STOP if len(l)>=10 else astrometry.Action.CONTINUE,
                         sip_order=3
                     ),
-                    
                 )
                 
                 if sol.has_match():
