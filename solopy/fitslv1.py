@@ -238,7 +238,7 @@ class FitsLv1:
             
             # mask (bad pixels)
             mask_badpix = (sci.data <= 0) | np.isnan(sci.data) | np.isinf(sci.data) \
-               | (np.isinf(ccdmflat.data)) | (np.is_nan(ccdmflat.data) \
+               | (np.isinf(ccdmflat.data)) | (np.isnan(ccdmflat.data) \
                | (ccdmflat.data > 1.5) | (ccdmflat.data <= 0.4))  # flat correction can amplify bad pixels, so mask them too
             
             # mask (nearby very bright & streak-like sources)
