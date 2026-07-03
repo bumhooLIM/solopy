@@ -329,7 +329,9 @@ class FitsLv2:
                     flag_bad = np.zeros(len(aperture), dtype=bool)
 
                 # Math and Columns
-                ap_area = aperture.area  
+                # ap_area = aperture.area  
+                ap_stats = ApertureStats(data, aperture, mask=mask)
+                ap_area = ap_stats.sum_aper_area
                 phot_table['fwhm_used']      = local_fwhm  
                 phot_table['r_ap_pixel']     = r_ap
                 phot_table['aperture_area']  = ap_area
