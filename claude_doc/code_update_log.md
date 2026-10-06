@@ -268,3 +268,28 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - The remaining ~0.4 px (≈ 1.2″) comes from astrometry.net's fit to ~40 J2000 index stars. It is well below the
     FWHM, so asteroid recentering absorbs it; a Gaia-based WCS refinement could remove it later.
 - **Effect on products:** Lv1 WCS (and everything positioned with it) needs Lv1 regeneration.
+
+### CU-013 · Lv1 bit mask; saturated pixels always flag photometry (review R1)
+
+- **Issue:** the Lv1 `MASK` was a plain 0/1 array, so photometry could not tell a saturated core from a hot pixel.
+  Under the 5 % rule (CU-008), 24 of 104 saturated asteroid measurements (all V ≤ 11.5, and 70 % at V 12–12.5)
+  would have been accepted with ≥ 13 % of their flux missing.
+- **Change:**
+  - New public module `solopy/maskbits.py`, also exported as `solopy.maskbits`, defining the bits: 1 `BADPIX` (BPM,
+    flat defect, NaN/Inf, pre-existing), 2 `SATURATED` (raw ≥ 3800 ADU), 4 `BORDER` (100 px), 8 `NONPOSITIVE`
+    (≤ 0 after dark or flat), 16 `BRIGHT_STAR`, 32 `TRAIL`. It also holds `SATURATION_ADU`, `BORDER_PIX`,
+    `header_cards()` and `has_bits()`.
+  - `FitsLv1.correct_bdf` writes the `MASK` extension as a `uint8` bit mask. The same pixels are masked as before;
+    only the reason is now kept. Headers gain `MASKVER = 2`, `MASKB1…MASKB32`, and `NSATPIX`.
+    `_mask_source(..., return_parts=True)` returns the bright-star and trail masks separately.
+  - `FitsLv2.perform_photometry` accepts a boolean or a bit mask. Any saturated pixel touching the aperture sets
+    `saturated` and `badphot`, whatever the masked fraction. New columns: `saturated`, `nsatpix`.
+  - `calculate_zeropoint` and `FitsLv3.extract_sso_photometry` pass the bit mask through (boolean only to SEP).
+    For an old 0/1 mask, Lv2 logs that saturation cannot be recognized.
+- **Verification:**
+  - `tests/test_fitslv1_bdf.py`: a synthetic `correct_bdf` run gives `SATURATED` for a raw 4000 ADU pixel, `BADPIX`
+    for the BPM hot pixel and for the flat defect, `BORDER` at the edge, and 0 elsewhere. Both headers document the
+    bits, and `NSATPIX = 1`.
+  - `tests/test_photometry.py`: one saturated core pixel (2.3 % of the aperture) flags the source; one hot pixel
+    there does not. Full suite passes.
+- **Effect on products:** needs Lv1 regeneration, so the masks carry the bits, then Lv2/Lv3.

@@ -10,6 +10,7 @@ from photutils.aperture import CircularAperture, CircularAnnulus, aperture_photo
 from .region import SOLORegion
 from .gaia import GaiaQuery
 from ._logutil import get_logger
+from . import maskbits
 
 
 __all__ = ["FitsLv2"]
@@ -182,15 +183,27 @@ class FitsLv2:
 
         A source is flagged `badphot` when masked pixels cover more than `badpix_frac_max`
         of its aperture area (default 5%; 0 reproduces the old "any masked pixel" rule),
-        or when its background-subtracted flux is not positive. Masked pixels are excluded
-        from both the aperture sum and `aperture_area`.
+        when any saturated pixel touches its aperture, or when its background-subtracted
+        flux is not positive. Masked pixels are excluded from both the aperture sum and
+        `aperture_area`.
+
+        `mask` may be boolean or an Lv1 bit mask (`solopy.maskbits`); saturation can only
+        be recognized from a bit mask.
         """
         try:
             # 1. Map Sources to Regional FWHM
             if sources.empty:
-                    self.logger.warning("No sources provided for photometry.")  
+                    self.logger.warning("No sources provided for photometry.")
                     return pd.DataFrame()
-            
+
+            # Integer masks are Lv1 bit masks; any non-zero pixel is excluded from the photometry.
+            sat_map = None
+            if mask is not None:
+                mask = np.asarray(mask)
+                if np.issubdtype(mask.dtype, np.integer):
+                    sat_map = (mask & maskbits.SATURATED) != 0
+                mask = mask != 0
+
             if psf_table is not None and not psf_table.empty:
                 regions = SOLORegion(data.shape, base_tile_size=base_tile_size)
                 
@@ -243,12 +256,18 @@ class FitsLv2:
                 
                 # Bad Pixel Checking: fraction of the aperture area covered by masked pixels
                 if mask is not None:
-                    mask_bool = mask.astype(bool)
-                    n_badpixel = np.atleast_1d(np.asarray(ApertureStats(mask_bool, aperture).sum, dtype=float))
+                    n_badpixel = np.atleast_1d(np.asarray(ApertureStats(mask, aperture).sum, dtype=float))
                 else:
                     n_badpixel = np.zeros(len(aperture))
                 badpix_frac = n_badpixel / aperture.area
-                flag_bad = badpix_frac > badpix_frac_max
+
+                # Saturated pixels always flag: the lost core flux cannot be recovered (review R1)
+                if sat_map is not None:
+                    n_satpix = np.atleast_1d(np.asarray(ApertureStats(sat_map, aperture).sum, dtype=float))
+                else:
+                    n_satpix = np.zeros(len(aperture))
+                saturated = n_satpix > 0
+                flag_bad = (badpix_frac > badpix_frac_max) | saturated
 
                 # Math and Columns
                 # Unmasked aperture area, matching the masked aperture sum. photutils returns a
@@ -286,6 +305,8 @@ class FitsLv2:
                 phot_table["badphot"] = flag_bad
                 phot_table["nbadpix"] = n_badpixel
                 phot_table["badpix_frac"] = badpix_frac
+                phot_table["saturated"] = saturated
+                phot_table["nsatpix"] = n_satpix
                 
                 # Convert this group's results to pandas
                 df_phot = phot_table.to_pandas().drop(columns=["id", "xcenter", "ycenter"])
@@ -337,7 +358,11 @@ class FitsLv2:
         try:
             with fits.open(fpath_fits) as hdul:
                 data = hdul[0].data.astype(np.float32) 
-                mask = hdul[1].data.astype(bool) if len(hdul) > 1 else np.zeros_like(data, dtype=bool)
+                # Keep the Lv1 bit mask (saturation is needed by perform_photometry)
+                mask = hdul[1].data if len(hdul) > 1 else np.zeros(data.shape, dtype=np.uint8)
+                if len(hdul) > 1 and not maskbits.has_bits(hdul[1].header):
+                    self.logger.warning(f"{fpath_fits.name}: MASK has no saturation bits (Lv1 made before solopy 1.1); "
+                                        "saturated stars are rejected only through the masked-fraction rule.")
                 hdr = hdul[0].header
                 wcs = WCS(hdr)
                 
@@ -359,7 +384,7 @@ class FitsLv2:
             dist_thresh_pix=15, bright_star_dist_thresh_pix=50
         )
         
-        source_sep = self.sep_extract_source(data, mask=mask, thresh=3.0, fwhm=global_fwhm)
+        source_sep = self.sep_extract_source(data, mask=mask != 0, thresh=3.0, fwhm=global_fwhm)
         
         if source_gaia is None or source_sep is None or source_sep.empty:
             self.logger.warning(f"Extraction failed or empty for {fpath_fits.name}. Skipping.")

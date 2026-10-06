@@ -12,6 +12,7 @@ import astrometry
 import ccdproc
 from ._logutil import get_logger
 from ._fileutil import APPLEDOUBLE_GLOB
+from . import maskbits
 
 __all__ = ["FitsLv1"]
 
@@ -203,11 +204,11 @@ class FitsLv1:
             self.logger.error(f"Failed to load master frames for {fpath_fits.name}: {e}")
             return None
         
-        # mask (saturated pixels)
-        mask_saturated = sci.data >= 3800 # kl4040 saturation level=4096 ADU (12-bit)
-    
+        # mask (saturated pixels; raw values before any correction)
+        mask_saturated = sci.data >= maskbits.SATURATION_ADU  # kl4040 saturation level=4096 ADU (12-bit)
+
         # mask (edgeside)
-        edge_width = 100  # pixels
+        edge_width = maskbits.BORDER_PIX  # pixels
         mask_edge = np.zeros(sci.data.shape, dtype=bool)
         mask_edge[:edge_width, :] = True
         mask_edge[-edge_width:, :] = True
@@ -235,32 +236,35 @@ class FitsLv1:
             hdr['FLATCORR'] = (True, "Flat corrected?")
             hdr['FLATNAME'] = (ccdmflat.meta.get('FILENAME', 'Unknown'), "Master flat frame used")
             
-            # mask (bad pixels)
-            mask_badpix = (sci.data <= 0) | np.isnan(sci.data) | np.isinf(sci.data) \
+            # mask (bad pixels): non-finite values, and flat defects (flat correction can amplify bad pixels)
+            mask_badpix = np.isnan(sci.data) | np.isinf(sci.data) \
                | (np.isinf(ccdmflat.data)) | (np.isnan(ccdmflat.data) \
-               | (ccdmflat.data > 1.5) | (ccdmflat.data <= 0.4))  # flat correction can amplify bad pixels, so mask them too
-            
-            # mask (nearby very bright & streak-like sources)
-            mask_source = self._mask_source(sci.data)
-            
-            # Combine all masks
-            combined_mask = mask_saturated | mask_edge | mask_badpix | mask_source | mask_negative
+               | (ccdmflat.data > 1.5) | (ccdmflat.data <= 0.4))
             if ccdmask is not None:
-                combined_mask |= (ccdmask.data.astype(bool))
+                mask_badpix |= ccdmask.data.astype(bool)
             if sci.mask is not None:
-                combined_mask |= sci.mask.astype(bool)
-                
-            sci.mask = combined_mask
-            # sci.data = np.nan_to_num(np.clip(sci.data, 0, None), nan=0.0) 
-            
-            # If you MUST fill bad pixels so they don't break simple numpy math later, 
-            # fill them with the median of the image, NOT zero.
-            # median_sky = np.nanmedian(sci.data)
-            # sci.data[sci.data <= 0] = median_sky
-            
+                mask_badpix |= sci.mask.astype(bool)
+            mask_nonpositive = mask_negative | (sci.data <= 0)
+
+            # mask (nearby very bright & streak-like sources)
+            mask_bright, mask_trail = self._mask_source(sci.data, return_parts=True)
+
+            # Combine all masks as a bit mask (see solopy.maskbits): the reason for every masked
+            # pixel is kept, so photometry can always reject saturated pixels (robustness review R1).
+            mask_bits = np.zeros(sci.data.shape, dtype=np.uint8)
+            for bit, part in ((maskbits.BADPIX, mask_badpix), (maskbits.SATURATED, mask_saturated),
+                              (maskbits.BORDER, mask_edge), (maskbits.NONPOSITIVE, mask_nonpositive),
+                              (maskbits.BRIGHT_STAR, mask_bright), (maskbits.TRAIL, mask_trail)):
+                mask_bits[part] |= bit
+
+            sci.mask = mask_bits != 0
+
             hdr['HISTORY'] = f"({datetime.now().isoformat()}) BDF corrected and masked. (solopy.FitsLv1)"
-            hdr['NBADPIX'] = (int(np.sum(combined_mask)), "Number of bad pixels masked")
+            hdr['NBADPIX'] = (int(np.count_nonzero(mask_bits)), "Number of bad pixels masked")
+            hdr['NSATPIX'] = (int(np.count_nonzero(mask_saturated)), "Number of saturated pixels")
             hdr['MASKNAME'] = (ccdmask.meta.get('FILENAME', 'Unknown') if ccdmask else None, "Master mask frame used")
+            for key, value, comment in maskbits.header_cards():
+                hdr[key] = (value, comment)
             self.logger.info(f"Bias, Dark, and Flat processing & Bad pixel mask applied.")
         
         except Exception as e:
@@ -288,10 +292,10 @@ class FitsLv1:
         primary_hdu = fits.PrimaryHDU(data=sci.data, header=hdr)
         
         hdul_out = fits.HDUList([primary_hdu])
-        if sci.mask is not None:
-            mask_data = sci.mask.astype(np.uint8)
-            mask_hdu = fits.ImageHDU(data=mask_data, name='MASK')
-            hdul_out.append(mask_hdu)
+        mask_hdu = fits.ImageHDU(data=mask_bits, name='MASK')
+        for key, value, comment in maskbits.header_cards():
+            mask_hdu.header[key] = (value, comment)
+        hdul_out.append(mask_hdu)
         
         try:
             hdul_out.writeto(fpath_out, overwrite=True)
@@ -369,7 +373,10 @@ class FitsLv1:
 
         return master_frame
     
-    def _mask_source(self, data, minarea=np.pi*12**2, ratio=3, mask_bright_source=True, mask_streak_source=True):
+    def _mask_source(self, data, minarea=np.pi*12**2, ratio=3, mask_bright_source=True, mask_streak_source=True,
+                     return_parts=False):
+        """Mask halos of very bright round sources and elongated trails.
+        Returns their union, or (bright, trail) when `return_parts` is True."""
         
         # SEP Byte-Order Defense
         data_sep = data.astype(np.float32)
@@ -414,4 +421,6 @@ class FitsLv1:
                 label = idx + 1 
                 mask_streak |= (segmap == label)
         
+        if return_parts:
+            return mask_bright, mask_streak
         return mask_bright | mask_streak

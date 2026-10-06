@@ -157,7 +157,8 @@ class FitsLv3:
                     data = hdul[0].data.astype(np.float32)
                     hdr = hdul[0].header
                     wcs = WCS(hdr)
-                    mask = hdul[1].data.astype(bool) if len(hdul) > 1 else np.zeros_like(data, dtype=bool)
+                    # Lv1 bit mask (solopy.maskbits); photometry needs the saturation bit
+                    mask = hdul[1].data if len(hdul) > 1 else np.zeros(data.shape, dtype=np.uint8)
                     
                     egain = float(hdr.get("EGAIN", 18.69))
                     rdnoise = float(hdr.get("RDNOISE", 3.9))
@@ -197,10 +198,10 @@ class FitsLv3:
 
             # 5. Centroid Refinement
             eph_obsid = self.lv2.find_centroid(
-                data=data, 
+                data=data,
                 sources=eph_obsid,
                 fwhm=fwhm_global,
-                mask=mask,
+                mask=mask != 0,
                 x_col="x_init", y_col="y_init"
             )
             

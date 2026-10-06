@@ -83,6 +83,24 @@ class TestPerformPhotometry(unittest.TestCase):
         self.assertEqual(row["badpix_frac"], 0.0)
         self.assertFalse(row["badphot"])
 
+    # --- saturation from the Lv1 bit mask (robustness review R1) ---
+    def test_single_saturated_pixel_always_flags(self):
+        from solopy import maskbits
+        bits = np.zeros(self.data.shape, dtype=np.uint8)
+        bits[51, 50] = maskbits.SATURATED                       # 1 core pixel = 2.3 % of the aperture
+        row = self._phot(mask=bits).iloc[0]
+        self.assertLess(row["badpix_frac"], 0.05)
+        self.assertTrue(row["saturated"])
+        self.assertTrue(row["badphot"])
+
+    def test_single_hot_pixel_does_not_flag(self):
+        from solopy import maskbits
+        bits = np.zeros(self.data.shape, dtype=np.uint8)
+        bits[51, 50] = maskbits.BADPIX
+        row = self._phot(mask=bits).iloc[0]
+        self.assertFalse(row["saturated"])
+        self.assertFalse(row["badphot"])
+
     def test_aperture_scales_with_tile_fwhm(self):
         psf_table = pd.DataFrame({"region_i": [0], "region_j": [0], "fwhm_avg": [3.0]})
         row = self._phot(psf_table=psf_table, base_tile_size=500).iloc[0]
