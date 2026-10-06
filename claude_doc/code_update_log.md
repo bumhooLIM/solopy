@@ -123,3 +123,25 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
     `gaiadr3_20arcsec.npy` (1,750 / 6,292 / 5,975 stars), with query time 0.01 s instead of 0.2–3.5 s.
 - **Effect on products:** none by itself. Zero-point inputs are identical by construction (verified). The driver
   must call it (see the driver entry).
+
+### CU-007 · **Critical:** photometry crashed on every call since `82036f8` (found while testing)
+
+- **Issue:** commit `82036f8` ("fix the photometric bug", 2026-07-04) set `ap_area = ApertureStats(...).sum_aper_area`.
+  In photutils 2.3 that is a `Quantity` in pix², so `aperture_sum - ap_area * msky` raised
+  `Can only apply 'subtract' function to dimensionless quantities …`.
+  - `FitsLv2.perform_photometry` caught the error and returned `None` for **every** call, so on the current `main` no
+    zero point (Lv2) and no asteroid photometry (Lv3) could be produced.
+  - Nobody noticed because the production run (2026-06-21 → 07-03) predates that commit.
+  - The same commit made `ap_area` an array but squared it without `[valid_nsky]`. That raises a broadcasting error
+    whenever one source of a batch has a fully masked sky annulus.
+- **Change:** `fitslv2.py`:
+  - new `_as_float_array()` converts photutils outputs (`sum_aper_area`, `median`, `std`) to plain float arrays;
+  - the sky-mean error term indexes `ap_area[valid_nsky]`.
+  - The intended behavior of `82036f8` is kept: the background is subtracted over the *unmasked* aperture area,
+    matching the masked aperture sum.
+- **Verification:** `tests/test_photometry.py` (3 tests; **all 3 fail on `main` @ `82036f8`**):
+  - a synthetic star of known flux is recovered within 1 %;
+  - a masked pixel reduces `aperture_area` by exactly 1 px²;
+  - a batch with one fully masked annulus returns both rows and flags the bad one.
+- **Effect on products:** none of the existing products were made with the broken code. Without this fix, the next
+  run of Lv2/Lv3 would have produced nothing.

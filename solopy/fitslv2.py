@@ -25,6 +25,12 @@ from .region import SOLORegion
 from .gaia import GaiaQuery
 from ._logutil import get_logger
 
+
+def _as_float_array(values):
+    """Plain 1-D float array from photutils outputs, which may be Quantity (e.g. areas in pix2)."""
+    return np.atleast_1d(np.asarray(getattr(values, "value", values), dtype=float))
+
+
 class FitsLv2:
     """
     Class for Level-2 processing (Photometric Zero Point Calculation).
@@ -307,9 +313,9 @@ class FitsLv2:
                 sigclip = SigmaClip(sigma=3.0, maxiters=5)
                 sky_stats = ApertureStats(data, annulus, mask=mask, sigma_clip=sigclip)
                 
-                msky = sky_stats.median
-                ssky = sky_stats.std
-                nsky = sky_stats.sum_aper_area 
+                msky = _as_float_array(sky_stats.median)
+                ssky = _as_float_array(sky_stats.std)
+                nsky = _as_float_array(sky_stats.sum_aper_area)  # Quantity [pix2] -> float
                 
                 # Bad Pixel Checking
                 if mask is not None:
@@ -322,9 +328,11 @@ class FitsLv2:
                     flag_bad = np.zeros(len(aperture), dtype=bool)
 
                 # Math and Columns
-                # ap_area = aperture.area  
+                # Unmasked aperture area, matching the masked aperture sum. photutils returns a
+                # Quantity [pix2]; subtracting it from the unitless aperture_sum raised and made
+                # every call return None (regression in 82036f8).
                 ap_stats = ApertureStats(data, aperture, mask=mask)
-                ap_area = ap_stats.sum_aper_area
+                ap_area = _as_float_array(ap_stats.sum_aper_area)
                 phot_table['fwhm_used']      = local_fwhm  
                 phot_table['r_ap_pixel']     = r_ap
                 phot_table['aperture_area']  = ap_area
@@ -338,7 +346,7 @@ class FitsLv2:
                 
                 sky_mean_err_term = np.zeros_like(msky, dtype=float)
                 valid_nsky = nsky > 0
-                sky_mean_err_term[valid_nsky] = (ap_area**2 * ssky[valid_nsky]**2) / nsky[valid_nsky]
+                sky_mean_err_term[valid_nsky] = (ap_area[valid_nsky]**2 * ssky[valid_nsky]**2) / nsky[valid_nsky]
                 
                 phot_table["source_sum_err"] = np.sqrt(ap_sum_err_sq + (ap_area * ssky**2) + sky_mean_err_term) 
                 
