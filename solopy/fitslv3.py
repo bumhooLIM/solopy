@@ -11,6 +11,7 @@ import kete
 # Assuming your existing modules are importable
 import solopy
 import skyloc as sloc
+from ._timeutil import utc_jd_to_tdb
 
 class FitsLv3:
     def __init__(self, orb_path, gaia_path, log_file=None):
@@ -67,11 +68,12 @@ class FitsLv3:
                 hdr = fits.getheader(fpath)
                 wcs = WCS(hdr)
                 
-                jd_mid = hdr["JD"]
+                # Header JD is mid-exposure UTC; kete expects TDB.
+                jd_mid_tdb = utc_jd_to_tdb(float(hdr["JD"]))
                 observatory = (hdr['LAT'], hdr['LON'], hdr['ELEVAT'])
-                
+
                 observer = kete.spice.earth_pos_to_ecliptic(
-                    jd_mid, *observatory, name=fpath.stem
+                    jd_mid_tdb, *observatory, name=fpath.stem
                 )
                 fovs.append(kete.fov.RectangleFOV.from_wcs(wcs, observer))
             except Exception as e:
