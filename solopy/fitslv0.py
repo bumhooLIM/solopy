@@ -11,6 +11,9 @@ from tqdm import tqdm
 from ._logutil import get_logger
 from ._fileutil import is_appledouble
 
+__all__ = ["FitsLv0"]
+
+
 class FitsLv0:
     """
     Class for calibration Level 0.

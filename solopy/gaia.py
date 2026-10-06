@@ -11,6 +11,9 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+__all__ = ["GaiaQuery", "NIGHTLY_SUBSET_RADIUS_DEG"]
+
+
 # Radius of the nightly Gaia subset around each telescope pointing [deg]:
 # FoV half-diagonal (4096 px * sqrt(2)/2 * 2.98"/px = 2.40 deg) + astrometry.net search radius
 # around the header pointing (2.0 deg, FitsLv1.update_wcs) + 0.1 deg buffer.

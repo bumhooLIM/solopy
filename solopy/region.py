@@ -1,3 +1,6 @@
+__all__ = ["SOLORegion"]
+
+
 class SOLORegion:
     
     def __init__(self, image_shape, base_tile_size=500):

@@ -12,6 +12,9 @@ from .gaia import GaiaQuery
 from ._logutil import get_logger
 
 
+__all__ = ["FitsLv2"]
+
+
 def _as_float_array(values):
     """Plain 1-D float array from photutils outputs, which may be Quantity (e.g. areas in pix2)."""
     return np.atleast_1d(np.asarray(getattr(values, "value", values), dtype=float))

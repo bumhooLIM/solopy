@@ -7,11 +7,13 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 import kete
 
-# Assuming your existing modules are importable
-import solopy
 import skyloc as sloc
+from .fitslv2 import FitsLv2
+from .gaia import GaiaQuery
 from ._timeutil import utc_jd_to_tdb
 from ._logutil import get_logger
+
+__all__ = ["FitsLv3"]
 
 class FitsLv3:
     def __init__(self, orb_path, gaia_path, log_file=None):
@@ -52,7 +54,7 @@ class FitsLv3:
             raise
             
         # Initialize an instance of Lv2 for its powerful photometry and centroiding tools
-        self.lv2 = solopy.FitsLv2(log_file=log_file)
+        self.lv2 = FitsLv2(log_file=log_file)
         self.logger.info("Level-3 Processor Ready.")
 
     def predict_targets(self, science_summary, vmag_upper=16.5):
@@ -107,7 +109,7 @@ class FitsLv3:
         self.logger.info("Cross-matching predictions with Gaia to assess blending risks...")
         skycoords_target = SkyCoord(ra=eph_all['ra'].values*u.deg, dec=eph_all['dec'].values*u.deg)
         
-        nearest_gaia_sources = solopy.GaiaQuery.query_nearest_gaia(
+        nearest_gaia_sources = GaiaQuery.query_nearest_gaia(
             target_coords=skycoords_target,
             gaia_data=self.gaia_all,
             gaia_band="g"

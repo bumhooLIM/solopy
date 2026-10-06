@@ -13,6 +13,9 @@ import ccdproc
 from ._logutil import get_logger
 from ._fileutil import APPLEDOUBLE_GLOB
 
+__all__ = ["FitsLv1"]
+
+
 class FitsLv1:
     """
     Class for Level-1 processing of RASA lcpy KL4040 science frames.

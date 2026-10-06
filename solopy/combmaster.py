@@ -14,6 +14,9 @@ from . import _fileutil
 from ._logutil import get_logger
 
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
+__all__ = ["CombMaster"]
+
+
 class CombMaster:
     """
     Class to create master calibration frames (i.e., bias, dark, flat) 

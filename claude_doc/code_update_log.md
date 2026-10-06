@@ -188,3 +188,29 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
     2.6 px FWHM in all 4 tiles within 0.15 px; importing no longer installs a global `RuntimeWarning` filter.
   - The full suite (39 tests) passes with `-W default` and emits no warnings.
 - **Effect on products:** none.
+
+### CU-010 · Packaging and import-time dependencies (§8 #3) + README (§8 #11, part 2)
+
+- **Issue:**
+  - `__init__.py` star-imported every module, so `import solopy` required kete and skyloc (via `fitslv3`) and
+    leaked names such as `np` and `fits` into the namespace.
+  - `pyproject.toml` omitted pandas, scipy, pyarrow, tqdm, kete, and skyloc, but listed the unused astroalign and
+    matplotlib.
+  - `requires-python >= 3.9` was too low (the code uses `str | None`).
+  - `fitslv3` did `import solopy` (a circular import).
+  - The README was empty.
+- **Change:**
+  - `solopy/__init__.py`: explicit imports; `FitsLv3` loaded lazily through module `__getattr__`; `__version__ = "1.1.0"`.
+  - Every module now has `__all__`. `fitslv3.py` uses relative imports.
+  - `pyproject.toml`: version 1.1.0, Python ≥ 3.10, the real core dependencies, extras `lv3`
+    (`kete>=1.0.8,<2`, the version skyloc requires; skyloc from GitHub, since it is not on PyPI) and `notebooks`
+    (matplotlib). astroalign removed.
+  - `README.md`: overview, installation, usage, tests, documentation links.
+- **Verification:** `tests/test_package.py`, using fresh interpreters:
+  - `import solopy` succeeds with kete and skyloc blocked, and `solopy.FitsLv3` then raises `ImportError`;
+  - no leaked names, and `from solopy import *` does not need Lv3;
+  - `FitsLv3` is reachable when the extras are installed;
+  - `pyproject.toml` is valid and matches `__version__`. The setuptools schema validation also passes.
+  - Full suite: 43 tests OK.
+- **Effect on products:** none. The installed editable metadata still reports 1.0.0 until
+  `pip install -e . --no-deps` is re-run.

@@ -4,23 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solopy"
-version = "1.0.0"
-description = "Astronomy convinient tools"
+version = "1.1.0"
+description = "Data reduction pipeline for SOLO (Solar system Object Light-curve Observatory)"
 authors = [{ name = "Bumhoo Lim", email = "bumhoo7@snu.ac.kr" }]
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.9"
-# Keep dependencies empty while you sort packaging; you can add later.
+requires-python = ">=3.10"
 dependencies = [
-    "astropy",
     "numpy",
+    "scipy",
+    "pandas",
+    "pyarrow",      # parquet zero-point tables
+    "astropy",
     "ccdproc",
-    "astrometry",
+    "photutils",
     "sep",
-    "matplotlib",
-    "astroalign",
-    "photutils"
+    "astrometry",   # astrometry.net solver; index files download on first use
+    "tqdm",
 ]
+
+[project.optional-dependencies]
+# Level 3 (asteroid prediction, FitsLv3). skyloc is not on PyPI and requires kete < 2.
+lv3 = [
+    "kete>=1.0.8,<2.0.0",
+    "skyloc @ git+https://github.com/ysBach/skyloc.git",
+]
+# Analysis notebooks in data/solo/notebooks
+notebooks = ["matplotlib"]
 
 [tool.setuptools.packages.find]
 where = ["."]
