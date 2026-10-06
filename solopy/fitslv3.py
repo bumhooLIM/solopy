@@ -127,10 +127,12 @@ class FitsLv3:
         self.logger.info(f"Successfully predicted {len(eph_all)} total asteroid appearances.")
         return eph_all
 
-    def extract_sso_photometry(self, science_summary, eph, psf_dir, ap_in_out=(1.5, 3.0, 4.0), base_tile_size=500):
+    def extract_sso_photometry(self, science_summary, eph, psf_dir, ap_in_out=(1.5, 3.0, 4.0), base_tile_size=500,
+                               badpix_frac_max=0.05):
         """
         Executes precision centroiding and spatially varying aperture photometry
-        for the predicted asteroids in each frame.
+        for the predicted asteroids in each frame. `badpix_frac_max` is passed to
+        `FitsLv2.perform_photometry` (flag `badphot` above this masked fraction of the aperture).
         """
         psf_dir = Path(psf_dir)
         sso_phot_list = []
@@ -215,7 +217,8 @@ class FitsLv3:
                 psf_table=psf_table,
                 base_tile_size=base_tile_size,
                 ap_in_out=ap_in_out,
-                x_col='x_winpos', y_col='y_winpos'
+                x_col='x_winpos', y_col='y_winpos',
+                badpix_frac_max=badpix_frac_max
             )
             
             if sso_phot_obsid is None or sso_phot_obsid.empty:

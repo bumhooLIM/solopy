@@ -145,3 +145,21 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - a batch with one fully masked annulus returns both rows and flags the bad one.
 - **Effect on products:** none of the existing products were made with the broken code. Without this fix, the next
   run of Lv2/Lv3 would have produced nothing.
+
+### CU-008 · `badphot` from the masked fraction of the aperture (new requirement)
+
+- **Issue:** `badphot` was set when *any* masked pixel touched the aperture, discarding 12.5 % of all asteroid
+  measurements. Most of these had only one or two hot or bad pixels in a ~40–70 px² aperture.
+- **Change:**
+  - `FitsLv2.perform_photometry(..., badpix_frac_max=0.05)`: `badpix_frac` = masked area inside the aperture
+    (exact-overlap weights) ÷ geometric aperture area. `badphot = badpix_frac > badpix_frac_max` or flux ≤ 0.
+  - New output column `badpix_frac`; `nbadpix` is kept. `badpix_frac_max=0` reproduces the old rule.
+  - `calculate_zeropoint` and `FitsLv3.extract_sso_photometry` pass the parameter through; the default is 5 %
+    everywhere.
+- **Verification:** `tests/test_photometry.py`: 1 masked px (2.3 %) is not flagged; 3 px (6.8 %) is flagged; a
+  threshold of 0 reproduces the old behavior; unmasked sources have fraction 0. Full suite passes.
+- **Effect on products:** applied to the existing 14,576 measurements, `badphot` falls from 12.5 % to 5.1 %, and
+  1,081 rows (median masked fraction 1.6 %) become usable. Takes effect when Lv2/Lv3 are re-run.
+  - **Caveat for the robustness review:** masked pixels are excluded, not repaired, so a "good" source can still lose
+    the flux of up to 5 % of its aperture.
+  - 337 of the newly usable rows are bright (V 11–13), where the masked pixels may be saturated cores.

@@ -256,10 +256,16 @@ class FitsLv2:
                            base_tile_size=500,  
                            ap_in_out=(2.5, 4.0, 6.0),
                            x_col='x', y_col='y',
-                           remove_bad_sources=False):
+                           remove_bad_sources=False,
+                           badpix_frac_max=0.05):
         """
         Perform fast, science-grade spatially varying aperture photometry.
         Automatically scales aperture radii per-region using GroupBy optimizations.
+
+        A source is flagged `badphot` when masked pixels cover more than `badpix_frac_max`
+        of its aperture area (default 5%; 0 reproduces the old "any masked pixel" rule),
+        or when its background-subtracted flux is not positive. Masked pixels are excluded
+        from both the aperture sum and `aperture_area`.
         """
         try:
             # 1. Map Sources to Regional FWHM
@@ -317,15 +323,14 @@ class FitsLv2:
                 ssky = _as_float_array(sky_stats.std)
                 nsky = _as_float_array(sky_stats.sum_aper_area)  # Quantity [pix2] -> float
                 
-                # Bad Pixel Checking
+                # Bad Pixel Checking: fraction of the aperture area covered by masked pixels
                 if mask is not None:
                     mask_bool = mask.astype(bool)
-                    bad_stats = ApertureStats(mask_bool, aperture)
-                    n_badpixel = bad_stats.sum
-                    flag_bad = n_badpixel > 0
+                    n_badpixel = np.atleast_1d(np.asarray(ApertureStats(mask_bool, aperture).sum, dtype=float))
                 else:
                     n_badpixel = np.zeros(len(aperture))
-                    flag_bad = np.zeros(len(aperture), dtype=bool)
+                badpix_frac = n_badpixel / aperture.area
+                flag_bad = badpix_frac > badpix_frac_max
 
                 # Math and Columns
                 # Unmasked aperture area, matching the masked aperture sum. photutils returns a
@@ -362,6 +367,7 @@ class FitsLv2:
                 
                 phot_table["badphot"] = flag_bad
                 phot_table["nbadpix"] = n_badpixel
+                phot_table["badpix_frac"] = badpix_frac
                 
                 # Convert this group's results to pandas
                 df_phot = phot_table.to_pandas().drop(columns=["id", "xcenter", "ycenter"])
@@ -533,7 +539,8 @@ class FitsLv2:
                             psf_table=None,       # NEW: Accepts the spatial PSF map
                             base_tile_size=500,   # NEW: Needed for region mapping
                             fallback_fwhm=2.5, 
-                            ap_in_out=(2.5, 4.0, 6.0)): # NEW: Multipliers instead of fixed radii
+                            ap_in_out=(2.5, 4.0, 6.0), # NEW: Multipliers instead of fixed radii
+                            badpix_frac_max=0.05):     # max masked fraction of an aperture
         """
         Calculates the photometric zero-point using Spatially Varying Aperture Photometry.
         """
@@ -617,7 +624,8 @@ class FitsLv2:
             psf_table=psf_table,            # NEW: Pass spatial table
             base_tile_size=base_tile_size,  # NEW: Pass tile size
             ap_in_out=ap_in_out,            # NEW: Dynamic Multipliers
-            x_col='x', y_col='y', remove_bad_sources=True
+            x_col='x', y_col='y', remove_bad_sources=True,
+            badpix_frac_max=badpix_frac_max
         )
         
         if phot is None or phot.empty:

@@ -63,6 +63,32 @@ class TestPerformPhotometry(unittest.TestCase):
         self.assertFalse(out.iloc[0]["badphot"])
         self.assertTrue(out.iloc[1]["badphot"])  # no sky estimate -> no valid flux
 
+    # --- badphot = masked fraction of the aperture above badpix_frac_max (default 5 %) ---
+    def test_small_masked_fraction_is_not_flagged(self):
+        row = self._phot(mask=self._mask([(3, 0)])).iloc[0]           # 1 px of 44.2 px = 2.3 %
+        self.assertAlmostEqual(row["badpix_frac"], 1.0 / (np.pi * 3.75 ** 2), places=6)
+        self.assertFalse(row["badphot"])
+
+    def test_large_masked_fraction_is_flagged(self):
+        row = self._phot(mask=self._mask([(3, 0), (-3, 0), (0, 3)])).iloc[0]  # 3 px = 6.8 %
+        self.assertGreater(row["badpix_frac"], 0.05)
+        self.assertTrue(row["badphot"])
+
+    def test_zero_threshold_reproduces_old_any_pixel_rule(self):
+        row = self._phot(mask=self._mask([(3, 0)]), badpix_frac_max=0.0).iloc[0]
+        self.assertTrue(row["badphot"])
+
+    def test_unmasked_source_has_zero_fraction(self):
+        row = self._phot(mask=np.zeros(self.data.shape, dtype=bool)).iloc[0]
+        self.assertEqual(row["badpix_frac"], 0.0)
+        self.assertFalse(row["badphot"])
+
+    def test_aperture_scales_with_tile_fwhm(self):
+        psf_table = pd.DataFrame({"region_i": [0], "region_j": [0], "fwhm_avg": [3.0]})
+        row = self._phot(psf_table=psf_table, base_tile_size=500).iloc[0]
+        self.assertAlmostEqual(row["mapped_fwhm"], 3.0)
+        self.assertAlmostEqual(row["r_ap_pixel"], 4.5)
+
 
 if __name__ == "__main__":
     unittest.main()
