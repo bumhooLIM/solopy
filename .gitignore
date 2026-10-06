@@ -24,6 +24,10 @@ fig/
 data/
 doc/
 
+# Claude Code local notes (kept out of the repository)
+CLAUDE.md
+handoff.md
+
 
 
 
