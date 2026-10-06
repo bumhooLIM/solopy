@@ -533,3 +533,26 @@ replaced by the 1.1 validation output.
     clipped). On the 31 nights made by 1.0 it reproduces the previous clean file: 2,668 matched bins, median
     difference 0.0 mmag, 14 bins differing by more than 0.02 mag (flag changes).
 - **Effect on products:** the clean light-curve file is produced by the notebook (see CU-025).
+
+## 2026-10-06 · Deployment to `~/Desktop/data/solo` (confirmed by the user)
+
+### CU-025 · Driver deployed; `summary_results.ipynb` uses `solopy.lightcurve`; products backed up
+
+- **Issue:** the 1.1 driver, batch script, and light-curve module existed only in the repo. Production still ran
+  the 1.0 driver, and the notebook still used its own inline flagging and binning (review R7).
+- **Change:** in `~/Desktop/data/solo` (outside this repo):
+  - `notebooks/main.py` and `notebooks/run_solopy.sh` replaced by the repo versions; the old files are kept as
+    `main.v1.0.py` and `run_solopy.v1.0.sh`.
+  - `notebooks/summary_results.ipynb`:
+    - flags from `add_quality_flags` and bins from `bin_lightcurve`;
+    - the plots mark `flag_badphot`, `flag_contam` and `flag_zpspread`, and use `mag_err_tot` error bars when
+      present;
+    - the outputs of the edited cells are cleared; the old version is kept as `summary_results.v1.0.ipynb`.
+  - Products backed up before the reprocessing: `backup_v1.0_20261006/{results,zp,psf,log}` (883 MB; file counts
+    verified).
+- **Verification:**
+  - The notebook was executed on a scratch copy of all 32 result files (2026_0630 from the validation run): no
+    errors, 565 figures, and the clean file described in CU-024.
+  - The deployed files are identical to the repo versions (`cmp`).
+- **Effect on products:** none yet. The reprocessing (`LEVELS=1,2,3 ./run_solopy.sh`, about 12 h) is started by
+  the user. The Lv1 files on T7 are not backed up: 484 GB does not fit in the 380 GB free.
