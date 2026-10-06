@@ -11,6 +11,7 @@ import astropy.units as u
 import astrometry
 import ccdproc
 from ._logutil import get_logger
+from ._fileutil import APPLEDOUBLE_GLOB
 
 class FitsLv1:
     """
@@ -298,7 +299,7 @@ class FitsLv1:
         # Cache the ImageFileCollection DataFrame to prevent massive I/O bottlenecks
         # Make sure self._master_cache = {} is in __init__
         if str(masterdir) not in getattr(self, '_master_cache', {}):
-            coll = ccdproc.ImageFileCollection(masterdir, glob_include="*.fits")
+            coll = ccdproc.ImageFileCollection(masterdir, glob_include="*.fits", glob_exclude=APPLEDOUBLE_GLOB)
             # Create the cache dictionary if it doesn't exist
             if not hasattr(self, '_master_cache'):
                 self._master_cache = {}

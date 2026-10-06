@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
 from ._logutil import get_logger
+from ._fileutil import is_appledouble
 
 class FitsLv0:
     """
@@ -29,7 +30,7 @@ class FitsLv0:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         
-        bz2_files = list(in_dir.glob("*.fits.bz2"))
+        bz2_files = [f for f in in_dir.glob("*.fits.bz2") if not is_appledouble(f)]
         if not bz2_files:
             self.logger.warning(f"No .fits.bz2 files found in {in_dir}")
             return

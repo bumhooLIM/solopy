@@ -4,6 +4,16 @@ from typing import List, Optional, Tuple
 import numpy as np
 import re
 
+# macOS writes AppleDouble companions ("._<name>") on exFAT/FAT volumes such as the T7 SSD.
+# They are not FITS files; use this pattern as `glob_exclude` for ccdproc.ImageFileCollection.
+APPLEDOUBLE_GLOB = "._*"
+
+
+def is_appledouble(path) -> bool:
+    """True for macOS AppleDouble metadata files (names starting with '._')."""
+    return Path(path).name.startswith("._")
+
+
 def check_file_exsist(fpath):
     '''
     Check if the fpath exists.

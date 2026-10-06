@@ -44,3 +44,21 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   output; `log_file=None` keeps the current file; two `FitsLv2` instances write a message once. The last test fails on
   the old code.
 - **Effect on products:** none (log formatting only). Future logs no longer repeat lines.
+
+### CU-003 · Ignore macOS AppleDouble (`._*`) files everywhere (§8 #6)
+
+- **Issue:** on the exFAT T7 drive macOS creates `._<name>` companions. `FitsLv0.batch_decompress` tried to
+  decompress them, and `FitsLv1._select_master` and the `CombMaster` flat temp-dir scan read them as FITS. Together
+  they caused most of the 929 `ERROR` and 5,655 `WARNING` log lines.
+- **Change:**
+  - `solopy/_fileutil.py`: add `APPLEDOUBLE_GLOB = "._*"` and `is_appledouble()`.
+  - `fitslv0.py`: `batch_decompress` skips AppleDouble files.
+  - `fitslv1.py`: `_select_master` excludes them.
+  - `combmaster.py`: the master searches use the shared pattern (previously `*._*.fits`), and the flat `tmp/` scan
+    excludes them.
+  - ccdproc matches `glob_exclude` against bare file names, so `._*` is sufficient.
+- **Verification:** `tests/test_fileutil.py`:
+  - a real `.bz2` FITS beside a fake `._` companion decompresses with no `ERROR` log, and the companion is left alone;
+  - `_select_master` picks the bias with no ccdproc `WARNING`. The old scan reproduces the production warning
+    `unable to get FITS header … No SIMPLE card found`.
+- **Effect on products:** none (log noise and robustness only). `clean_double.py` is no longer required before a run.

@@ -86,7 +86,7 @@ class CombMaster:
             self.logger.info(f"Searching for closest master bias to JD={target_jd:.1f}...")
     
         try:
-            mbias_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits', glob_exclude='*._*.fits').filter(imagetyp='BIAS')
+            mbias_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits', glob_exclude=_fileutil.APPLEDOUBLE_GLOB).filter(imagetyp='BIAS')
             if not mbias_coll.files:
                 self.logger.error(f"No master bias found in {master_dir}.")
                 return None, None
@@ -142,7 +142,7 @@ class CombMaster:
             self.logger.info(f"Searching for closest master dark to JD={target_jd:.1f}, exp={target_exptime:.1f}s...")
         
         try:
-            mdark_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits', glob_exclude='*._*.fits').filter(imagetyp='DARK')
+            mdark_coll = ccdproc.ImageFileCollection(master_dir, glob_include='*.fits', glob_exclude=_fileutil.APPLEDOUBLE_GLOB).filter(imagetyp='DARK')
             if not mdark_coll.files:
                 self.logger.warning(f"No master darks found in {master_dir}.")
                 return None, None
@@ -500,7 +500,9 @@ class CombMaster:
                 self.logger.error(f"Failed to process: {e}")
 
         # Combine processed flats
-        processed_flats = ccdproc.ImageFileCollection(TMPDIR).filter(imagetyp='FLAT').files
+        processed_flats = ccdproc.ImageFileCollection(
+            TMPDIR, glob_include="*.fits", glob_exclude=_fileutil.APPLEDOUBLE_GLOB
+        ).filter(imagetyp='FLAT').files
         if not processed_flats:
             self.logger.error("No flat frames were successfully processed.")
             return None  
