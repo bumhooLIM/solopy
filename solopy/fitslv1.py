@@ -36,6 +36,9 @@ class FitsLv1:
         """
         Solve for WCS and update FITS header.
         Reads .fits and writes to .wcs.fits.
+
+        Returns the output path, or None when the frame could not be read, had no
+        detectable sources, or has no astrometric solution (nothing is written then).
         """
         fpath_fits = Path(fpath_fits)
         outdir = Path(outdir)
@@ -113,39 +116,41 @@ class FitsLv1:
         except Exception as e:
             self.logger.warning(f"Astrometry.net solver failed for {fpath_fits.name}: {e}")
 
-        # 5. Compute center coordinates safely
-        if wcs_solved:
-            try:
-                # 5a. Time-Independent Coordinates (RA/DEC)
-                naxis1 = int(sci.header.get('NAXIS1', 4096))
-                naxis2 = int(sci.header.get('NAXIS2', 4096))
-                cen = (naxis1 // 2, naxis2 // 2)
-                
-                sky = sci.wcs.pixel_to_world(*cen)
-                sci.header['RACEN']  = (sky.ra.value, "[deg] Center Right Ascension")
-                sci.header['DECCEN'] = (sky.dec.value, "[deg] Center Declination")
-                
-                # 5b. Time-Dependent Coordinates (Alt/Az)
-                if 'JD' not in sci.header:
-                    self.logger.warning(f"Missing 'JD' in header for {fpath_fits.name}. Skipping Alt/Az calculation.")
-                else:
-                    obs_lat = float(sci.header.get('LAT', 37.07))
-                    obs_lon = float(sci.header.get('LON', -119.4))
-                    obs_el  = float(sci.header.get('ELEVAT', 1.405))
-                    obs_jd  = float(sci.header['JD']) # Strictly use the header's Julian Date
+        # 5. Without a solution there is nothing useful to write: return None so callers skip the frame.
+        if not wcs_solved:
+            self.logger.warning(f"No WCS for {fpath_fits.name}; frame skipped (no output written).")
+            return None
 
-                    loc = EarthLocation(lat=obs_lat*u.deg, lon=obs_lon*u.deg, height=obs_el*u.km)
-                    altaz = sky.transform_to(AltAz(obstime=Time(obs_jd, format='jd'), location=loc))
-                    
-                    sci.header['ALTCEN'] = (altaz.alt.value, "[deg] Center Altitude")
-                    sci.header['AZCEN']  = (altaz.az.value, "[deg] Center Azimuth")
-                
-            except Exception as e:
-                self.logger.warning(f"Center coordinate calculation failed for {fpath_fits.name}: {e}")
-        else:
-            self.logger.warning(f"Skipping center coord calculation (no WCS) for {fpath_fits.name}.")
+        # 6. Compute center coordinates safely
+        try:
+            # 6a. Time-Independent Coordinates (RA/DEC)
+            naxis1 = int(sci.header.get('NAXIS1', 4096))
+            naxis2 = int(sci.header.get('NAXIS2', 4096))
+            cen = (naxis1 // 2, naxis2 // 2)
 
-        # 6. Save output file
+            sky = sci.wcs.pixel_to_world(*cen)
+            sci.header['RACEN']  = (sky.ra.value, "[deg] Center Right Ascension")
+            sci.header['DECCEN'] = (sky.dec.value, "[deg] Center Declination")
+
+            # 6b. Time-Dependent Coordinates (Alt/Az)
+            if 'JD' not in sci.header:
+                self.logger.warning(f"Missing 'JD' in header for {fpath_fits.name}. Skipping Alt/Az calculation.")
+            else:
+                obs_lat = float(sci.header.get('LAT', 37.07))
+                obs_lon = float(sci.header.get('LON', -119.4))
+                obs_el  = float(sci.header.get('ELEVAT', 1.405))
+                obs_jd  = float(sci.header['JD']) # Strictly use the header's Julian Date
+
+                loc = EarthLocation(lat=obs_lat*u.deg, lon=obs_lon*u.deg, height=obs_el*u.km)
+                altaz = sky.transform_to(AltAz(obstime=Time(obs_jd, format='jd'), location=loc))
+
+                sci.header['ALTCEN'] = (altaz.alt.value, "[deg] Center Altitude")
+                sci.header['AZCEN']  = (altaz.az.value, "[deg] Center Azimuth")
+
+        except Exception as e:
+            self.logger.warning(f"Center coordinate calculation failed for {fpath_fits.name}: {e}")
+
+        # 7. Save output file
         out_name = f"{fpath_fits.stem}.wcs.fits"
         outpath = outdir / out_name
 

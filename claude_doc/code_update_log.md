@@ -62,3 +62,14 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - `_select_master` picks the bias with no ccdproc `WARNING`. The old scan reproduces the production warning
     `unable to get FITS header … No SIMPLE card found`.
 - **Effect on products:** none (log noise and robustness only). `clean_double.py` is no longer required before a run.
+
+### CU-004 · `update_wcs` returns `None` for unsolved frames (§8 #7)
+
+- **Issue:** when astrometry.net found no solution, `FitsLv1.update_wcs` still wrote `<stem>.wcs.fits` (without WCS)
+  and returned its path. The driver's `if not fpath_wcs` guard therefore never fired. The frame was dropped one step
+  later by `correct_bdf` with `'NoneType' object has no attribute 'to_header'` (80 frames in the 2026 logs).
+- **Change:** `fitslv1.py`: return `None` before computing center coordinates when there is no solution; nothing is
+  written. The docstring now documents the return value.
+- **Verification:** `tests/test_fitslv1_wcs.py` replaces astrometry.net with a fake solver. Unsolved: `None` and no
+  file (this test fails on the old code). Solved: a path whose header has `RACEN`, `ALTCEN`, `PIXSCALE`, `LV0FILE`.
+- **Effect on products:** none. The same frames are dropped, now at the intended place with a clear log message.
