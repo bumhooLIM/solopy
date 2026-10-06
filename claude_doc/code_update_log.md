@@ -328,3 +328,37 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - The CU-013 saturation and hot-pixel tests now use an edge pixel, so each rule is tested on its own.
   - Full suite passes.
 - **Effect on products:** fluxes of sources with masked pixels in the aperture change; needs Lv2/Lv3 re-run.
+
+### CU-016 · Color term and local zero point at solar color (review R2, R3; `mag_err_tot` for R5)
+
+- **Issue:**
+  - One zero point per frame cannot follow the extinction gradient across the 3.4° field (0.10–0.13 mag at
+    airmass > 2) or the fixed detector pattern (±40 mmag).
+  - Asteroids were also calibrated at the mean color of field stars (BP−RP ≈ 1.01) rather than solar color (0.82),
+    with a color slope of −0.063 mag/mag.
+- **Change:**
+  - New module `solopy/zeropoint.py`: `fit_color_term` (clipped linear fit referred to BP−RP = 0.82),
+    `local_zero_points` (clipped median of the stars within a radius, with standard error, spread, count, and a
+    fallback flag), `robust_std`, `SOLAR_BP_RP`.
+  - `FitsLv2.calculate_zeropoint` keeps Gaia BP/RP for the zero-point stars and fits the color term per frame.
+    - Headers: `ZP_SUN` (zero point at solar color), `ZPCOLOR` (slope), `ZPNCOLOR`; `ZP_G` is unchanged.
+    - The zero-point table gains `bp_rp`, `zp_star_sun` (each star's zero point at solar color), and `zp_clipped`.
+  - `FitsLv3.extract_sso_photometry(..., zp_dir=…, zp_local_radius=500, zp_local_min=10, sys_floor_mag=0.01)`:
+    - each measurement gets `zp_local`, `zperr_local`, `zp_local_spread`, `zp_local_n`, `zp_local_fallback` from its
+      frame's table;
+    - fewer than 10 stars, or a table from before 1.1, falls back to the frame's solar-color zero point;
+    - also `zp_sun`, `zp_color`, and `mag_err_tot` = √(mag_err² + zperr_local² + 0.01²). The 0.01 mag floor is
+      provisional, to be measured during validation.
+  - Driver: `gmag = mag_inst + zp_local`. The results CSV adds `mag_err_tot`, `saturated`, `psf_lost_frac`,
+    `zp_sun`, `zp_color`, and the `zp_local*` columns.
+- **Verification:**
+  - `tests/test_zeropoint.py` (7 tests):
+    - the slope (−0.063) and solar-color zero point are recovered within 0.006 and 0.004 despite 5 % outliers;
+    - a local zero point follows an injected 0.10 mag gradient within 0.012 mag where the global median is off by
+      more than 0.03;
+    - fallbacks work for sparse regions and empty tables.
+  - Driver smoke test (6 real frames, levels 1–3): exit 0, no warnings. Lv1 `MASKVER = 2` with `NSATPIX = 4322`.
+    `ZP_SUN` is 0.005–0.013 mag above `ZP_G`, with color slopes −0.031 to −0.054. Each asteroid gets a local zero
+    point from up to 54 stars, `zperr_local` ≈ 0.009 mag.
+- **Effect on products:** asteroid magnitudes move by the local and color corrections (typically ±0.03 mag; 5–95 %
+  range −0.064…+0.056 mag in the review). Needs Lv2/Lv3 re-run.

@@ -452,15 +452,17 @@ def main(argv=None):
         # Extract SSO Photometry
         sso_phot_summary = lv3.extract_sso_photometry(science_summary, eph=eph_all, psf_dir=PSF_DIR,
                                                       ap_in_out=(1.5, 3.0, 4.0),
-                                                      badpix_frac_max=args.badpix_frac_max)
+                                                      badpix_frac_max=args.badpix_frac_max,
+                                                      zp_dir=ZP_DIR)
         if sso_phot_summary.empty:
             print("Photometry extraction failed. Exiting.")
             return
 
-        # 6. Apply Absolute Calibrations
-        sso_phot_summary.dropna(subset=['mag_inst', 'zp_global'], inplace=True)
+        # 6. Apply Absolute Calibrations: local zero point at solar color (falls back to the frame
+        #    value at solar color when fewer than 10 stars lie within 500 px)
+        sso_phot_summary.dropna(subset=['mag_inst', 'zp_local'], inplace=True)
 
-        sso_phot_summary['gmag'] = sso_phot_summary['mag_inst'] + sso_phot_summary['zp_global']
+        sso_phot_summary['gmag'] = sso_phot_summary['mag_inst'] + sso_phot_summary['zp_local']
         sso_phot_summary['gmag_distcorr'] = sso_phot_summary['gmag'] - 5 * np.log10(sso_phot_summary['r_hel'] * sso_phot_summary['r_obs'])
 
         # 7. Save Results
@@ -471,8 +473,11 @@ def main(argv=None):
             'x_winpos', 'y_winpos', 'mapped_fwhm', 'r_ap_pixel', 'aperture_area',
             'aperture_sum', 'aperture_sum_err', 'annulus_median',
             'bkg_std', 'nsky', 'source_sum', 'source_sum_err', 'snr',
-            'mag_inst', 'mag_err', 'badphot', 'nbadpix', 'badpix_frac',
-            'zp_global', 'zperr_global', 'gmag', 'gmag_distcorr',
+            'mag_inst', 'mag_err', 'mag_err_tot', 'badphot', 'nbadpix', 'badpix_frac',
+            'saturated', 'psf_lost_frac',
+            'zp_global', 'zperr_global', 'zp_sun', 'zp_color',
+            'zp_local', 'zperr_local', 'zp_local_spread', 'zp_local_n', 'zp_local_fallback',
+            'gmag', 'gmag_distcorr',
             'nearest_gaia_source_id', 'nearest_gaia_gmag', 'nearest_gaia_dist_arcsec'
         ]
 

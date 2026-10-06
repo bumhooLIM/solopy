@@ -12,6 +12,7 @@ from .fitslv2 import FitsLv2
 from .gaia import GaiaQuery
 from ._timeutil import utc_jd_to_tdb
 from ._logutil import get_logger
+from .zeropoint import local_zero_points
 
 __all__ = ["FitsLv3"]
 
@@ -129,13 +130,20 @@ class FitsLv3:
         return eph_all
 
     def extract_sso_photometry(self, science_summary, eph, psf_dir, ap_in_out=(1.5, 3.0, 4.0), base_tile_size=500,
-                               badpix_frac_max=0.05):
+                               badpix_frac_max=0.05, zp_dir=None, zp_local_radius=500.0, zp_local_min=10,
+                               sys_floor_mag=0.01):
         """
         Executes precision centroiding and spatially varying aperture photometry
         for the predicted asteroids in each frame. `badpix_frac_max` is passed to
         `FitsLv2.perform_photometry` (flag `badphot` above this masked fraction of the aperture).
+
+        With `zp_dir` (the Lv2 zero-point tables, one folder per night), each measurement also
+        gets a local zero point at solar color from the stars within `zp_local_radius` px
+        (robustness review R2/R3), and `mag_err_tot` = sqrt(mag_err^2 + zperr_local^2 +
+        sys_floor_mag^2) for weighting (review R5).
         """
         psf_dir = Path(psf_dir)
+        zp_dir = Path(zp_dir) if zp_dir is not None else None
         sso_phot_list = []
         
         self.logger.info("Commencing target photometry extraction...")
@@ -234,6 +242,19 @@ class FitsLv3:
             sso_phot_obsid['zperr_global'] = row.get('zperr_g', np.nan)
             sso_phot_obsid['fwhm_global'] = fwhm_global
 
+            # 8. Local zero point at solar color (review R2/R3) and total error (review R5)
+            zp_sun = float(hdr.get('ZP_SUN', row.get('zp_g', np.nan)))
+            sso_phot_obsid['zp_sun'] = zp_sun
+            sso_phot_obsid['zp_color'] = float(hdr.get('ZPCOLOR', np.nan))
+            if zp_dir is not None:
+                local = self._local_zero_points(zp_dir / subdir_name / str(row.get('zpfile', '')), hdr,
+                                                sso_phot_obsid['x_winpos'], sso_phot_obsid['y_winpos'],
+                                                zp_sun, zp_local_radius, zp_local_min)
+                for col in local.columns:
+                    sso_phot_obsid[col] = local[col].to_numpy()
+                sso_phot_obsid['mag_err_tot'] = np.sqrt(sso_phot_obsid['mag_err']**2
+                                                        + sso_phot_obsid['zperr_local']**2 + sys_floor_mag**2)
+
             sso_phot_list.append(sso_phot_obsid)
 
         # Final Compilation
@@ -244,3 +265,18 @@ class FitsLv3:
         sso_phot_summary = pd.concat(sso_phot_list, ignore_index=True)
         self.logger.info(f"Successfully extracted {len(sso_phot_summary)} photometric data points.")
         return sso_phot_summary
+
+    def _local_zero_points(self, fpath_zp, hdr, x, y, zp_sun, radius, min_stars):
+        """Local zero points at (x, y) from a frame's Lv2 table; global fallback when unavailable."""
+        n_global = max(int(hdr.get('ZPSOURCE', 1)), 1)
+        fallback_err = float(hdr.get('ZPERR_G', np.nan)) / np.sqrt(n_global)
+        try:
+            table = pd.read_parquet(fpath_zp)
+        except Exception as e:
+            self.logger.warning(f"No zero-point table {Path(fpath_zp).name} ({e}); using the frame zero point.")
+            table = None
+        if table is None or 'zp_star_sun' not in table.columns:
+            # Tables from before solopy 1.1 have no colors: fall back to the frame value
+            return local_zero_points([], [], [], x, y, radius, min_stars, fallback_zp=zp_sun, fallback_err=fallback_err)
+        return local_zero_points(table['x'], table['y'], table['zp_star_sun'], x, y, radius, min_stars,
+                                 fallback_zp=zp_sun, fallback_err=fallback_err)

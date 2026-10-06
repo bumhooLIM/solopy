@@ -11,6 +11,7 @@ from .region import SOLORegion
 from .gaia import GaiaQuery
 from ._logutil import get_logger
 from . import maskbits
+from .zeropoint import SOLAR_BP_RP, fit_color_term
 
 
 __all__ = ["FitsLv2"]
@@ -451,12 +452,15 @@ class FitsLv2:
             return False
         
         # Skip centroiding and use SEP positions. (temporary)
-        keep_cols = ['ra_ref', 'dec_ref', 'x_source', 'y_source', 'phot_g_mean_mag_ref']
+        keep_cols = ['ra_ref', 'dec_ref', 'x_source', 'y_source', 'phot_g_mean_mag_ref',
+                     'phot_bp_mean_mag_ref', 'phot_rp_mean_mag_ref']
         source_final = matched_sources[keep_cols].rename(columns={
             'ra_ref': 'ra',
             'dec_ref': 'dec',
             'phot_g_mean_mag_ref': 'phot_g_mean_mag',
-            'x_source': 'x', 
+            'phot_bp_mean_mag_ref': 'phot_bp_mean_mag',
+            'phot_rp_mean_mag_ref': 'phot_rp_mean_mag',
+            'x_source': 'x',
             'y_source': 'y'
             })
         mask_gaia_mag = (source_final['phot_g_mean_mag'] >= mag_lower) & (source_final['phot_g_mean_mag'] <= mag_upper)
@@ -492,7 +496,15 @@ class FitsLv2:
         zp = phot_clipped['mag_diff_g_inst'].median()
         zp_err = phot_clipped['mag_diff_g_inst'].std()
         num_sources = len(phot_clipped)
-        
+
+        # 5b. Color term; every star's zero point referred to solar color (review R3). Lv3 builds
+        #     local zero points from `zp_star_sun` (review R2).
+        phot['bp_rp'] = phot['phot_bp_mean_mag'] - phot['phot_rp_mean_mag']
+        phot['zp_clipped'] = outlier_mask
+        zp_sun, zp_color, n_color = fit_color_term(phot_clipped['mag_diff_g_inst'],
+                                                   phot['bp_rp'][~outlier_mask])
+        phot['zp_star_sun'] = phot['mag_diff_g_inst'] - zp_color * (phot['bp_rp'] - SOLAR_BP_RP)
+
         # 6. Save to Parquet
         fpath_out_pq = outdir_zp / f"zp.{fpath_fits.stem}.parquet"
         try:
@@ -508,8 +520,12 @@ class FitsLv2:
             fits.setval(fpath_fits, 'ZPSOURCE', value=int(num_sources), comment='Number of sources used for ZP')
             # Keep the comment short: the long file name leaves ~13 characters on the 80-char card.
             fits.setval(fpath_fits, 'ZPFILE', value=fpath_out_pq.name, comment='ZP table')
-            
-            self.logger.info(f"Updated header ZP={zp:.3f}$\\pm${zp_err:.3f} (N={num_sources})")
+            fits.setval(fpath_fits, 'ZP_SUN', value=float(zp_sun), comment='Zeropoint at solar color, BP-RP=0.82')
+            fits.setval(fpath_fits, 'ZPCOLOR', value=float(zp_color), comment='dZP/d(BP-RP) [mag/mag]')
+            fits.setval(fpath_fits, 'ZPNCOLOR', value=int(n_color), comment='Number of stars in the color fit')
+
+            self.logger.info(f"Updated header ZP={zp:.3f}$\\pm${zp_err:.3f} (N={num_sources}); "
+                             f"at solar color {zp_sun:.3f}, color slope {zp_color:+.3f}")
         except Exception as e:
             self.logger.error(f"Failed to write ZP headers to {fpath_fits.name}: {e}")
             return False
