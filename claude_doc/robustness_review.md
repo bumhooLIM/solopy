@@ -174,6 +174,7 @@ in `code_update_log.md`.
 | R9 dark temperature | CU-017 | ±1 °C preference, `DARKDT` |
 | Crashed nights 0619/0626 | CU-020 | diverging PSF fit no longer fatal; per-frame errors logged |
 | Renamed Lv1 frames on re-runs | CU-023 | found by the validation below |
+| Light-curve module on mixed 1.0/1.1 files; clipping in small bins | CU-024 | found by running `summary_results.ipynb` on the validation output |
 
 ## Validation on 2026_0630
 
@@ -194,4 +195,4 @@ Gaia catalog and orbits, and compared with the production products of that night
 | `gmag` change | 628 rows unflagged in both versions: median +8.3 mmag = color term +10.2 mmag (solar color) and local zero point −2.9 mmag; 5–95 % −44 to +56 mmag. Instrumental magnitudes are unchanged. |
 | Errors | `mag_err` 19 % smaller (sky variance no longer counted twice); `mag_err_tot / mag_err` median 1.03. |
 | Flags | `badphot` 15.4 % → 12.6 %. 88 of the 97 flagged rows are saturated: every measurement brighter than V = 12.5 is saturated in 60 s (e.g. (5), (9), (192)), and none at V ≥ 13. `contam_frac` > 2 %: 5.9 %; `zp_local` fallback: 2.7 %. |
-| Light curves | `flag_any` 25.9 % (badphot 12.6, contamination 5.9, low altitude 4.7, ZP spread 2.7, twilight 2.7, ZP error 2.6, low SNR 0.8). 189 five-minute bins of 29 asteroids; 55 points clipped. The old notebook blend rule, with units fixed (`flag_neargaia`, informational), would flag 68 %. |
+| Light curves | `flag_any` 25.9 % (badphot 12.6, contamination 5.9, low altitude 4.7, ZP spread 2.7, twilight 2.7, ZP error 2.6, low SNR 0.8). 189 five-minute bins of 29 asteroids; 2 points clipped (55 before CU-024). The old notebook blend rule, with units fixed (`flag_neargaia`, informational), would flag 68 %. |

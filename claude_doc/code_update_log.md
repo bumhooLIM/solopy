@@ -504,3 +504,32 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
     6 PSF and ZP tables, 7 deletions logged, and 24 result rows on 6 frames with no duplicates.
 - **Effect on products:** none by itself. It makes the reprocessing (#2) safe: about 0.5 % of frames (1 of 195 on
   2026_0630) are renamed by the WCS fix.
+
+### CU-024 · `solopy.lightcurve`: mixed result versions and clipping in small bins (review R7)
+
+Both problems were found by running the switched `summary_results.ipynb` on all result files, with 2026_0630
+replaced by the 1.1 validation output.
+
+- **Issue 1, mixed versions:** after concatenating result files made by 1.0 and 1.1, `zperr_local` and `contam_frac`
+  exist as columns but are NaN in the 1.0 rows.
+  - `bin_lightcurve` summed squared errors with NaN, so every 1.0 point had a NaN error and was dropped: the 31
+    nights made by 1.0 produced no bins at all.
+  - `add_quality_flags` estimated the contamination only when the `contam_frac` column was absent, so the 1.0
+    rows were never flagged as contaminated.
+- **Issue 2, clipping:** a bin's robust sigma came from its own points. Most bins have 3 points (1,797 of 2,524 bins
+  with ≥ 3 points), whose MAD is often far too small: 8.1 % of all points were clipped, and 8.0 % in a simulation of
+  pure Gaussian noise with the same bin sizes and errors.
+- **Change:** `solopy/lightcurve.py`:
+  - `bin_lightcurve`: the first error column (`mag_err`) is required; the others (`zperr_local`) are added where
+    finite.
+  - `add_quality_flags`: rows without `contam_frac` (absent or NaN) get the nearest-star estimate; measured values
+    are kept.
+  - Clipping uses max(robust sigma, median point error √(stat² + floor²)). Clipped points drop to 0.2 % (0.4 % in
+    the noise simulation), while a +0.3 mag outlier is caught about as often as before (72 % vs 75 %).
+- **Verification:**
+  - `tests/test_lightcurve.py`: three new tests (mixed binning, mixed contamination, 3-point bin), each failing on
+    the previous code. Full suite: 81 tests OK.
+  - The notebook on all 32 result files runs without errors and produces 2,947 bins of 62 asteroids (19 points
+    clipped). On the 31 nights made by 1.0 it reproduces the previous clean file: 2,668 matched bins, median
+    difference 0.0 mmag, 14 bins differing by more than 0.02 mag (flag changes).
+- **Effect on products:** the clean light-curve file is produced by the notebook (see CU-025).

@@ -67,6 +67,14 @@ def _results(n=12, seed=0):
     return df
 
 
+def _old_results(n=6, seed=1):
+    """Lv3 rows as written before 1.1 (no zperr_local, contam_frac, zp_local_spread), 18 nights earlier."""
+    df = _results(n, seed).drop(columns=["zperr_local", "contam_frac", "zp_local_spread"])
+    df["obsdate"], df["jd_utc"] = "20260612", df["jd_utc"] - 18.0
+    df["exptime"], df["zp_global"], df["psf_fwhm"], df["source_sum"] = 60.0, 18.6, 2.5, 5000.0
+    return df
+
+
 class TestQualityFlags(unittest.TestCase):
     def test_near_gaia_rule_uses_arcsec(self):
         df = _results(2)
@@ -106,6 +114,17 @@ class TestQualityFlags(unittest.TestCase):
         self.assertFalse(out.flag_contam.iloc[1])
         self.assertFalse(out.flag_zpspread.any())
 
+    def test_mixed_old_and_new_results_estimate_contamination_for_old_rows(self):
+        # Regression: after concatenating 1.0 and 1.1 result files, contam_frac was NaN for the
+        # 1.0 rows, so they were never flagged as contaminated.
+        old = _old_results(2)
+        old.loc[0, ["nearest_gaia_dist_arcsec", "nearest_gaia_gmag"]] = [6.0, 15.0]   # 2 px away, bright
+        new = _results(2)
+        new.loc[0, "contam_frac"] = 0.05
+        out = add_quality_flags(pd.concat([new, old], ignore_index=True))
+        self.assertEqual(out.flag_contam.tolist(), [True, False, True, False])
+        self.assertEqual(out.contam_frac.iloc[1], 0.0)                     # measured values are kept
+
 
 class TestBinning(unittest.TestCase):
     def test_bins_clip_outliers_and_add_floor_once(self):
@@ -119,11 +138,31 @@ class TestBinning(unittest.TestCase):
         expected = np.sqrt((0.02**2 + 0.005**2) / n0 + 0.01**2)
         self.assertAlmostEqual(out.mag_err_wmean.iloc[0], expected, places=6)
 
+    def test_three_point_bin_keeps_points_within_their_errors(self):
+        # Regression: the MAD of 3 points is often tiny. Two nearly equal points made a 2-sigma
+        # third point an "outlier"; on the real data this clipped 8 % of all points.
+        df = add_quality_flags(_results(3))
+        df["gmag_distcorr"] = [10.000, 10.001, 10.040]                   # errors 0.02 mag
+        self.assertEqual(bin_lightcurve(df, window_min=5.0).n_clipped.sum(), 0)
+        df.loc[2, "gmag_distcorr"] = 10.5                                 # a real outlier is still clipped
+        self.assertEqual(bin_lightcurve(df, window_min=5.0).n_clipped.sum(), 1)
+
     def test_flagged_points_are_excluded(self):
         df = add_quality_flags(_results(6))
         df.loc[0:2, "flag_any"] = True
         out = bin_lightcurve(df, window_min=10.0)
         self.assertEqual(out.n_obs.sum(), 3)
+
+    def test_mixed_old_and_new_results_are_all_binned(self):
+        # Regression: zperr_local is NaN for 1.0 rows after concatenation; their errors became NaN
+        # and every 1.0 point was dropped from the bins.
+        mixed = add_quality_flags(pd.concat([_results(6), _old_results(6)], ignore_index=True))
+        out = bin_lightcurve(mixed, window_min=10.0, floor_mag=0.01).set_index("obsdate")
+        self.assertEqual(sorted(out.index), ["20260612", "20260630"])
+        self.assertEqual(out.n_obs.sum() + out.n_clipped.sum(), 12)
+        old, new = out.loc["20260612"], out.loc["20260630"]
+        self.assertAlmostEqual(old.mag_err_wmean, np.sqrt(0.02**2 / old.n_obs + 0.01**2), places=6)
+        self.assertAlmostEqual(new.mag_err_wmean, np.sqrt((0.02**2 + 0.005**2) / new.n_obs + 0.01**2), places=6)
 
 
 if __name__ == "__main__":

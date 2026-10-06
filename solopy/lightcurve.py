@@ -51,8 +51,9 @@ def add_quality_flags(df, zperr_max=0.2, zp_spread_max=0.1, snr_min=3.0, contam_
       flag_lowsnr     snr < snr_min
       flag_badphot    badphot (masked fraction, saturation, masked PSF flux, non-positive flux)
       flag_contam     catalogued stars add more than contam_max of the asteroid flux. Uses
-                      `contam_frac` (all Gaia stars, Lv3 >= 1.1); for older result files it is
-                      estimated from the nearest Gaia star alone and stored in `contam_frac`.
+                      `contam_frac` (all Gaia stars, Lv3 >= 1.1); for rows from older result
+                      files (no `contam_frac`, also when mixed with newer files) it is estimated
+                      from the nearest Gaia star alone and stored in `contam_frac`.
       flag_lowalt     field altitude below alt_min_dusk (dusk fields) / alt_min_dawn (dawn fields)
       flag_twilight   Sun altitude above sun_alt_max
       flag_any        any of the above
@@ -73,15 +74,18 @@ def add_quality_flags(df, zperr_max=0.2, zp_spread_max=0.1, snr_min=3.0, contam_
     pixscale = col("pixscale", pixscale_arcsec).fillna(pixscale_arcsec)
     obj = col("object", "").astype(str)
 
-    if "contam_frac" not in out.columns:
-        # Older result files: estimate the contamination from the nearest Gaia star only
-        zp = col("zp_local").fillna(col("zp_global")) if "zp_local" in out.columns else col("zp_global")
-        fwhm = col("psf_fwhm").fillna(col("mapped_fwhm")) if "psf_fwhm" in out.columns else col("mapped_fwhm")
+    # Rows from result files made before 1.1 have no contam_frac: the column is absent, or NaN when
+    # old and new files are concatenated. Estimate it for those rows from the nearest Gaia star only.
+    no_contam = col("contam_frac").isna()
+    if no_contam.any():
+        zp = col("zp_local").fillna(col("zp_global"))
+        fwhm = col("psf_fwhm").fillna(col("mapped_fwhm"))
         star_flux = col("exptime") * 10 ** (-0.4 * (col("nearest_gaia_gmag") - zp))
         inside = aperture_contamination(col("nearest_gaia_dist_arcsec") / pixscale, star_flux,
                                         col("r_ap_pixel"), fwhm)
         source = col("source_sum")
-        out["contam_frac"] = np.where(source > 0, inside / source.where(source > 0, 1.0), np.nan)
+        estimate = pd.Series(np.where(source > 0, inside / source.where(source > 0, 1.0), np.nan), index=out.index)
+        out["contam_frac"] = col("contam_frac").where(~no_contam, estimate)
 
     flags = {
         "flag_zperr": col("zperr_global") > zperr_max,
@@ -119,10 +123,12 @@ def bin_lightcurve(df, window_min=5.0, mag_col="gmag_distcorr", stat_err_cols=("
     """
     Bin unflagged measurements of each asteroid per night into windows of `window_min` minutes.
 
-    Inside a bin, points deviating more than `clip_sigma` robust sigmas from the median are dropped
-    (bins of 3+ points). The bin value is the inverse-variance weighted mean with per-point errors
+    Inside a bin, points deviating from the median by more than `clip_sigma` times the robust
+    scatter are dropped (bins of 3+ points); the scatter is never taken below the median point error
+    sqrt(stat_err^2 + floor_mag^2), which few-point bins would otherwise underestimate. The bin value is the inverse-variance weighted mean with per-point errors
     sqrt(sum of `stat_err_cols`^2); its error is sqrt(1/sum(w) + floor_mag^2), so a systematic floor
-    is added once and not averaged down.
+    is added once and not averaged down. The first error column is required; the others are added
+    where present (results made before 1.1 have no `zperr_local`, also when mixed with newer ones).
     """
     d = df.copy()
     d["desig"] = d["desig"].astype(str).str.strip()
@@ -131,8 +137,11 @@ def bin_lightcurve(df, window_min=5.0, mag_col="gmag_distcorr", stat_err_cols=("
     d = d.sort_values(["obsdate", "desig", tcol]).reset_index(drop=True)
     d["time_group"] = _time_groups(d["obsdate"].to_numpy(), d["desig"].to_numpy(), d[tcol].to_numpy(dtype=float),
                                    window_min / 1440.0)
-    err_cols = [c for c in stat_err_cols if c in d.columns]
-    d["_stat_err"] = np.sqrt(np.sum([d[c].to_numpy(dtype=float) ** 2 for c in err_cols], axis=0))
+    var = d[stat_err_cols[0]].to_numpy(dtype=float) ** 2
+    for name in stat_err_cols[1:]:
+        if name in d.columns:
+            var = var + np.nan_to_num(d[name].to_numpy(dtype=float) ** 2, nan=0.0)
+    d["_stat_err"] = np.sqrt(var)
     usable = np.isfinite(d[mag_col]) & np.isfinite(d["_stat_err"]) & (d["_stat_err"] > 0)
     if flag_col in d.columns:
         usable &= ~d[flag_col].astype(bool)
@@ -142,7 +151,10 @@ def bin_lightcurve(df, window_min=5.0, mag_col="gmag_distcorr", stat_err_cols=("
         mag = g[mag_col].to_numpy(dtype=float)
         keep = np.ones(len(g), dtype=bool)
         if len(g) >= 3:
-            s = robust_std(mag)
+            # Robust scatter, but never below the typical point error: in bins of 3-4 points the MAD is
+            # often far too small, and clipped 8 % of the points of pure-noise bins instead of < 1 %.
+            point_err = np.hypot(g["_stat_err"].to_numpy(), floor_mag)
+            s = max(robust_std(mag), np.median(point_err))
             if np.isfinite(s) and s > 0:
                 keep = np.abs(mag - np.median(mag)) <= clip_sigma * s
         gk = g[keep]
