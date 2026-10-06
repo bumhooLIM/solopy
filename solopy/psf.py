@@ -1,21 +1,17 @@
+import warnings
 import numpy as np
 import pandas as pd
 from astropy.nddata import Cutout2D
-from astropy.stats import sigma_clipped_stats, SigmaClip
-from astropy.table import Table
+from astropy.stats import SigmaClip
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy.modeling.models import Gaussian2D
-from photutils.detection import DAOStarFinder
+from astropy.utils.exceptions import AstropyUserWarning
 from photutils.aperture import CircularAnnulus, ApertureStats
-import copy
 import sep
 from .region import SOLORegion as soloregion
 
-import warnings
-from astropy.utils.exceptions import AstropyUserWarning
-# Add this at the top of your master script, right after your imports:
-warnings.simplefilter('ignore', category=AstropyUserWarning)
-warnings.simplefilter('ignore', category=RuntimeWarning)
+__all__ = ["soloPSF"]
+
 
 class soloPSF:
     
@@ -179,10 +175,18 @@ class soloPSF:
     def process_ccd(self, ccd):
         """
         Process the entire CCD, splitting it into regions and evaluating PSF variations.
-        
+
         Returns:
         - pd.DataFrame containing the FWHM statistics for each spatial tile.
         """
+        # Gaussian fits of faint or irregular cutouts warn by design. Silence those warnings here only;
+        # the module used to silence AstropyUserWarning and RuntimeWarning for the whole process on import.
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=AstropyUserWarning)
+            warnings.simplefilter('ignore', category=RuntimeWarning)
+            return self._process_tiles(ccd)
+
+    def _process_tiles(self, ccd):
         regions = soloregion(ccd.shape, self.base_tile_size)
         result_table = []
         

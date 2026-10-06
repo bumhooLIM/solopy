@@ -163,3 +163,28 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - **Caveat for the robustness review:** masked pixels are excluded, not repaired, so a "good" source can still lose
     the flux of up to 5 % of its aperture.
   - 337 of the newly usable rows are bright (V 11–13), where the masked pixels may be saturated cores.
+
+### CU-009 · Remove dead code; keep warning filters local (§8 #11, part 1)
+
+- **Issue:** about 320 commented-out lines in `fitslv2.py` (an old `find_centroid`, an old vectorized
+  `perform_photometry`, a SkyBoT `find_asteroids_in_fov`, and commented blocks inside `calculate_zeropoint`). Plus
+  unused modules (`_utils.py`, `_ccdutil.py`), unused helpers in `_fileutil.py`, and unused imports, including
+  `astroquery` for the dead SkyBoT code. `psf.py` silenced `AstropyUserWarning` and `RuntimeWarning` for the whole
+  Python process as soon as `solopy` was imported. `fitslv1.py` used `ndarray.newbyteorder()`, which NumPy 2 removed
+  (in a branch that is never reached today).
+- **Change:**
+  - `fitslv2.py`: commented blocks removed (318 comment-only lines; no executable line changed). Unused imports
+    removed: `astroquery`/`Skybot`, `CCDData`, `Cutout2D`, `SkyCoord`, `Time`, `units`, the centroid functions,
+    `_utils`, `logging`.
+  - Deleted `solopy/_utils.py` (a duplicate of `FitsLv0.batch_decompress`) and `solopy/_ccdutil.py` (never imported;
+    a copy lives in `data/solo/notebooks/ccdutil.py`).
+  - `_fileutil.py` keeps only `clear_dir` and the AppleDouble helpers.
+  - `psf.py`: unused imports removed; the warning filters apply only inside `soloPSF.process_ccd`; `__all__` added.
+  - `fitslv1.py`: NumPy-2-safe byte swap. `fitslv3.py`: unused `logging` import removed.
+  - The stale `notebooks/main.py` is replaced by the updated driver later in this branch.
+- **Verification:** a usage search over `data/solo/notebooks` (all `*.py`/`*.ipynb`) found no reference to the
+  removed helpers. The only `solopy.clear_dir` calls are two old notebook appendices that already fail.
+  - New `tests/test_region_psf.py`: 4096 px tiling, 8×8 tiles, last tile 596 px; `soloPSF` recovers an injected
+    2.6 px FWHM in all 4 tiles within 0.15 px; importing no longer installs a global `RuntimeWarning` filter.
+  - The full suite (39 tests) passes with `-W default` and emits no warnings.
+- **Effect on products:** none.

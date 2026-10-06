@@ -1,26 +1,12 @@
-import logging
 from pathlib import Path
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-from astropy.time import Time
-from astropy.coordinates import SkyCoord
-from astropy import units as u
 from astropy.stats import sigma_clip, SigmaClip
+from astropy.wcs import WCS
 import sep
-from ccdproc import CCDData
 from scipy.spatial import cKDTree
 from photutils.aperture import CircularAperture, CircularAnnulus, aperture_photometry, ApertureStats
-from . import _utils
-from astropy.wcs import WCS
-from astropy.time import Time
-import astropy.units as u
-from astroquery.imcce import Skybot
-import pandas as pd
-import numpy as np
-
-from photutils.centroids import centroid_1dg, centroid_com
-from astropy.nddata import Cutout2D
 from .region import SOLORegion
 from .gaia import GaiaQuery
 from ._logutil import get_logger
@@ -174,77 +160,6 @@ class FitsLv2:
             self.logger.error(f"SEP: Centroiding failed: {e}")
             return None
 
-    # def find_centroid(self, data, sources, cutout_size=15, mask=None, x_col='x', y_col='y'):
-    #     """
-    #     Perform background subtraction and calculate highly accurate centroids 
-    #     robust against elongated sources (tracking errors).
-    #     """
-    #     try:
-    #         # 1. Prepare the data (NumPy 2.0 compatible byte-swapping)
-    #         if data.dtype.byteorder == '>':
-    #             data = data.byteswap().view(data.dtype.newbyteorder())
-    #         data = data.astype(np.float32)
-
-    #         # 2. Global Background Subtraction
-    #         bkg = sep.Background(data, mask=mask)
-    #         data_bkgsub = data - bkg.back()
-            
-    #         updated_sources = sources.copy()
-    #         new_x, new_y = [], []
-    #         flags = []
-
-    #         # 3. Calculate Robust Centroids via Cutouts
-    #         # box_size should be large enough to encapsulate the full streak length.
-    #         for idx, row in updated_sources.iterrows():
-    #             init_x, init_y = row[x_col], row[y_col]
-                
-    #             try:
-    #                 # Create a 2D cutout around the initial guess
-    #                 cutout = Cutout2D(data_bkgsub, (init_x, init_y), cutout_size)
-                    
-    #                 # OPTION 1: 1D Marginal Gaussian Fit (Highly recommended for streaks)
-    #                 # It collapses the streak into 1D profiles, ignoring the asymmetric 2D shape
-    #                 xcen_cutout, ycen_cutout = centroid_1dg(cutout.data)
-                    
-    #                 # If 1D Gaussian fails (e.g., too noisy), fallback to Center of Mass
-    #                 if np.isnan(xcen_cutout) or np.isnan(ycen_cutout):
-    #                     xcen_cutout, ycen_cutout = centroid_com(cutout.data)
-
-    #                 # Convert cutout coordinates back to original image coordinates
-    #                 x_final, y_final = cutout.to_original_position((xcen_cutout, ycen_cutout))
-                    
-    #                 new_x.append(x_final)
-    #                 new_y.append(y_final)
-    #                 flags.append(0) # Success flag
-
-    #             except Exception:
-    #                 # Cutout failed (e.g., star too close to the edge of the sensor)
-    #                 new_x.append(init_x)
-    #                 new_y.append(init_y)
-    #                 flags.append(1) # Bad flag
-                    
-    #         # 4. Apply new coordinates and flags to the catalog
-    #         updated_sources['x_winpos'] = new_x # Keeping your column name for pipeline continuity
-    #         updated_sources['y_winpos'] = new_y
-    #         updated_sources['winpos_flag'] = flags
-
-    #         # 5. Filter out bad centroids
-    #         good_mask = (updated_sources['winpos_flag'] == 0)
-    #         final_sources = updated_sources[good_mask].reset_index(drop=True)
-
-    #         # Log the cleanup
-    #         bad_count = len(sources) - len(final_sources)
-    #         if bad_count > 0:
-    #             self.logger.info(f"Centroiding: Removed {bad_count} sources due to edge proximity or noise.")
-
-    #         self.logger.info(f"Centroiding: Calculated robust centroids for {len(final_sources)} sources.")
-    #         return final_sources
-
-    #     except Exception as e:
-    #         self.logger.error(f"Centroiding failed: {e}")
-    #         return None
-    
-    
     def perform_photometry(self,
                            data,
                            sources,
@@ -395,141 +310,6 @@ class FitsLv2:
             self.logger.error(f"Photometry failed: {e}")
             return None
           
-    # def perform_photometry(self,    
-    #                        data,
-    #                        sources,
-    #                        exptime,
-    #                        err=None,
-    #                        mask=None,
-    #                        fwhm=2.0,            # Fallback global FWHM
-    #                        psf_table=None,      # NEW: The DataFrame generated by soloPSF
-    #                        base_tile_size=500,  # NEW: Must match the SOLORegion setup
-    #                        ap_in_out=(2.0, 4.0, 6.0),
-    #                        x_col='x', y_col='y',
-    #                        remove_bad_sources=False):
-    #     """
-    #     Perform fast, science-grade spatially varying aperture photometry.
-    #     Automatically scales aperture radii per-star based on regional PSF variations.
-    #     """
-    #     try:
-    #         # 1. Map Sources to Regional FWHM
-    #         if psf_table is not None and not psf_table.empty:
-    #             # Initialize region boundaries
-    #             regions = SOLORegion(data.shape, base_tile_size=base_tile_size)
-                
-    #             # Vectorized lookup of the (i, j) grid index for every star simultaneously
-    #             region_i = (sources[x_col] // regions.base_tile_size).astype(int).clip(upper=regions.num_tiles_x - 1)
-    #             region_j = (sources[y_col] // regions.base_tile_size).astype(int).clip(upper=regions.num_tiles_y - 1)
-                
-    #             # Create a lookup mapping from the PSF DataFrame
-    #             fwhm_map = psf_table.set_index(['region_i', 'region_j'])['fwhm_avg']
-                
-    #             # Map the FWHM to the stars based on their (i, j) coordinates
-    #             source_idx = pd.MultiIndex.from_arrays([region_i, region_j])
-    #             fwhm_array = source_idx.map(fwhm_map).values
-                
-    #             # Safety Net: If a region failed its PSF fit (NaN), fallback to the global median
-    #             global_median_fwhm = psf_table['fwhm_avg'].median()
-    #             fwhm_array = np.nan_to_num(fwhm_array, nan=global_median_fwhm)
-                
-    #             # Prevent absurd values (e.g., > 10 pixels) just in case a bad fit snuck through
-    #             fwhm_array = np.clip(fwhm_array, 1.5, 10.0)
-                
-    #             self.logger.debug("Successfully applied spatially varying FWHM to apertures.")
-    #         else:
-    #             # Fallback to static global FWHM if no table is provided
-    #             fwhm_array = np.full(len(sources), float(fwhm))
-
-    #         # 2. Setup Dynamic Apertures (Photutils seamlessly handles arrays of radii)
-    #         positions = list(zip(sources[x_col], sources[y_col]))
-            
-    #         r_ap_array  = ap_in_out[0] * fwhm_array
-    #         r_in_array  = ap_in_out[1] * fwhm_array
-    #         r_out_array = ap_in_out[2] * fwhm_array
-            
-    #         print(ap_in_out[0], fwhm_array)
-            
-    #         aperture = CircularAperture(positions, r=r_ap_array)
-    #         annulus = CircularAnnulus(positions, r_in=r_in_array, r_out=r_out_array)
-            
-    #         # 3. Base Photometry
-    #         phot_table = aperture_photometry(data, aperture, error=err, mask=mask)
-            
-    #         # 4. Fast Local Background Estimation
-    #         sigclip = SigmaClip(sigma=3.0, maxiters=5)
-    #         sky_stats = ApertureStats(data, annulus, mask=mask, sigma_clip=sigclip)
-            
-    #         msky = sky_stats.median
-    #         ssky = sky_stats.std
-    #         nsky = sky_stats.sum_aper_area 
-            
-    #         # 5. Fast Bad Pixel Checking
-    #         if mask is not None:
-    #             mask_bool = mask.astype(bool)
-    #             bad_stats = ApertureStats(mask_bool, aperture)
-    #             n_badpixel = bad_stats.sum
-    #             flag_bad = n_badpixel > 0
-    #         else:
-    #             n_badpixel = np.zeros(len(aperture))
-    #             flag_bad = np.zeros(len(aperture), dtype=bool)
-
-    #         # 6. Math and Columns
-    #         ap_area = aperture.area  # Returns an array of areas for each dynamic aperture!
-    #         phot_table['fwhm_used']      = fwhm_array  # Store the actual FWHM used for traceability
-    #         phot_table['r_ap_pix']       = r_ap_array
-    #         phot_table['aparea']         = ap_area
-    #         phot_table['annulus_median'] = msky
-    #         phot_table['bkg_std']        = ssky
-    #         phot_table['nsky']           = nsky
-            
-    #         # Source flux (background subtracted)
-    #         phot_table['source_sum'] = phot_table['aperture_sum'] - (ap_area * msky)
-            
-    #         # Error Propagation
-    #         ap_sum_err_sq = phot_table['aperture_sum_err']**2 if 'aperture_sum_err' in phot_table.colnames else 0.0
-            
-    #         sky_mean_err_term = np.zeros_like(msky, dtype=float)
-    #         valid_nsky = nsky > 0
-    #         sky_mean_err_term[valid_nsky] = (ap_area[valid_nsky]**2 * ssky[valid_nsky]**2) / nsky[valid_nsky]
-            
-    #         phot_table["source_sum_err"] = np.sqrt(ap_sum_err_sq + (ap_area * ssky**2) + sky_mean_err_term) 
-            
-    #         # SNR
-    #         phot_table["snr"] = phot_table["source_sum"] / phot_table["source_sum_err"]
-            
-    #         # Instrumental Magnitude
-    #         valid_flux = phot_table["source_sum"] > 0
-    #         mag_inst = np.full(len(phot_table), np.nan)
-    #         mag_inst[valid_flux] = -2.5 * np.log10(phot_table["source_sum"][valid_flux] / exptime)
-    #         phot_table["mag_inst"] = mag_inst
-    #         flag_bad |= ~valid_flux  
-            
-    #         # Magnitude Error
-    #         phot_table["mag_err"] = (2.5 / np.log(10)) * (1.0 / phot_table["snr"])
-            
-    #         # Flags
-    #         phot_table["badphot"] = flag_bad
-    #         phot_table["nbadpix"] = n_badpixel
-            
-    #         # Clean up and convert to Pandas
-    #         df_phot = phot_table.to_pandas().drop(columns=["id", "xcenter", "ycenter"])
-            
-    #         df_combined = pd.concat([
-    #             sources.reset_index(drop=True), 
-    #             df_phot.reset_index(drop=True)
-    #         ], axis=1)
-            
-    #         if remove_bad_sources:
-    #             mask_good = ~df_combined["badphot"]
-    #             df_combined = df_combined[mask_good]
-    #             self.logger.info(f"Removed {np.sum(flag_bad)} sources flagged for bad photometry.")
-            
-    #         return df_combined
-
-    #     except Exception as e:
-    #         self.logger.error(f"Photometry failed: {e}")
-    #         return None
-
     def calculate_zeropoint(self, 
                             fpath_fits, 
                             gaia_data, 
@@ -549,12 +329,6 @@ class FitsLv2:
         outdir_zp.mkdir(parents=True, exist_ok=True)
         
         self.logger.info(f"Calculating Zero Point for {fpath_fits.name}...")
-        
-        # # Determine global FWHM for SEP extraction and centroiding
-        # if psf_table is not None and not psf_table.empty:
-        #     global_fwhm = float(psf_table['fwhm_avg'].mean())
-        # else:
-        #     global_fwhm = fallback_fwhm
         
         # 1. Safe File Handling
         try:
@@ -593,16 +367,6 @@ class FitsLv2:
         if matched_sources is None or matched_sources.empty:
             self.logger.warning(f"No matched sources found for {fpath_fits.name}. Skipping.")
             return False
-        
-        # # 3. Centroiding
-        # source_final = self.find_centroid(
-        #     data=data, sources=matched_sources, cutout_size=7*global_fwhm, mask=mask,
-        #     x_col='x_source', y_col='y_source'
-        # )
-
-        # if source_final is None or source_final.empty:
-        #     self.logger.warning(f"Centroiding failed for {fpath_fits.name}. Skipping.")
-        #     return False
         
         # Skip centroiding and use SEP positions. (temporary)
         keep_cols = ['ra_ref', 'dec_ref', 'x_source', 'y_source', 'phot_g_mean_mag_ref']
@@ -668,99 +432,3 @@ class FitsLv2:
             return False
             
         return True
-
-    # def find_asteroids_in_fov(self, wcs, hdr, mag_upper_limit=18.0):
-    #     """
-    #     Query SkyBoT (IMCCE) for all known minor planets within the FITS Field of View.
-    #     """
-    #     try:
-    #         # 1. Parse Time from Header
-    #         # Assumes hdr['jd'] is a float Julian Date
-    #         epoch = Time(hdr['jd'], format='jd')
-
-    #         # 2. Determine FOV Center and Radius
-    #         nx = hdr['NAXIS1']
-    #         ny = hdr['NAXIS2']
-
-    #         # Find the center of the image
-    #         center_x, center_y = nx / 2, ny / 2
-    #         center_world = wcs.pixel_to_world(center_x, center_y)
-
-    #         # Find max radius to the corners to ensure the cone covers the whole rectangle
-    #         corners_x = [0, nx, nx, 0]
-    #         corners_y = [0, 0, ny, ny]
-    #         corners_world = wcs.pixel_to_world(corners_x, corners_y)
-            
-    #         # The radius of our search cone is the distance from center to the furthest corner
-    #         search_radius = np.max(center_world.separation(corners_world))
-
-    #         self.logger.info(f"Querying SkyBoT at {epoch.isot} with radius {search_radius.to(u.deg):.2f}...")
-
-    #         # 3. Query SkyBoT
-    #         # Skybot natively returns a rich Astropy QTable
-    #         results = Skybot.cone_search(center_world, search_radius, epoch)
-            
-    #         if results is None or len(results) == 0:
-    #             self.logger.info("No asteroids found in this FOV.")
-    #             return pd.DataFrame()
-
-    #         # Convert to Pandas for easier manipulation downstream
-    #         df_ast = results.to_pandas()
-
-    #         # 4. Filter by Magnitude
-    #         # Skybot returns the predicted V-band magnitude in the 'V' column
-    #         df_ast = df_ast[df_ast['V'] <= mag_upper_limit].copy()
-
-    #         if df_ast.empty:
-    #             self.logger.info(f"No asteroids brighter than {mag_upper_limit} mag found.")
-    #             return df_ast
-
-    #         # 5. Calculate Pixel Coordinates
-    #         coords = SkyCoord(df_ast['RA']*u.deg, df_ast['DEC']*u.deg)
-    #         x, y = wcs.world_to_pixel(coords)
-    #         df_ast['x_pixel'] = x
-    #         df_ast['y_pixel'] = y
-
-    #         # 6. Strict Rectangular Masking
-    #         # Skybot queries a circle. We must trim off the corners that fall outside the CCD.
-    #         in_fov_mask = (
-    #             (df_ast['x_pixel'] >= 0) & (df_ast['x_pixel'] <= nx) &
-    #             (df_ast['y_pixel'] >= 0) & (df_ast['y_pixel'] <= ny)
-    #         )
-    #         df_ast = df_ast[in_fov_mask].reset_index(drop=True)
-
-    #         if df_ast.empty:
-    #             self.logger.info("Asteroids found, but they fell outside the CCD rectangle.")
-    #             return df_ast
-
-
-    #         # 8. Clean up and rename columns for sanity
-    #         rename_map = {
-    #             'Name': 'name',
-    #             'Number': 'number',
-    #             'RA': 'ra',
-    #             'DEC': 'dec',
-    #             'V': 'mag_v_pred',    # Predicted V magnitude
-    #             'r': 'r_hel_au',      # Heliocentric distance
-    #             'delta': 'delta_geo_au', # Geocentric distance
-    #             'alpha': 'phase_angle',  
-    #             'elong': 'solar_elong'
-    #         }
-    #         df_ast.rename(columns=rename_map, inplace=True)
-
-    #         # Select and order the columns of interest
-    #         cols_to_keep = [
-    #             'name', 'number', 'ra', 'dec', 'x_pixel', 'y_pixel', 
-    #             'mag_v_pred', 'r_hel_au', 'delta_geo_au', 'phase_angle', 
-    #             'solar_elong',
-    #         ]
-            
-    #         # Ensure we only try to keep columns that actually exist (failsafe)
-    #         final_cols = [c for c in cols_to_keep if c in df_ast.columns]
-            
-    #         self.logger.info(f"Successfully tracked {len(df_ast)} asteroids in FOV.")
-    #         return df_ast[final_cols]
-
-    #     except Exception as e:
-    #         self.logger.error(f"Asteroid FoV search failed: {e}")
-    #         return pd.DataFrame()

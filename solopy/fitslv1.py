@@ -63,7 +63,7 @@ class FitsLv1:
         # 2. SEP Data Preparation (Byte-swap defense for C-code compatibility)
         data_sep = sci.data.astype(np.float32)
         if data_sep.dtype.byteorder == '>':
-            data_sep = data_sep.byteswap().newbyteorder()
+            data_sep = data_sep.byteswap().view(data_sep.dtype.newbyteorder())  # NumPy 2 safe
 
         # 3. Detect sources using SEP
         try:
@@ -369,7 +369,7 @@ class FitsLv1:
         # SEP Byte-Order Defense
         data_sep = data.astype(np.float32)
         if data_sep.dtype.byteorder == '>':
-            data_sep = data_sep.byteswap().newbyteorder()
+            data_sep = data_sep.byteswap().view(data_sep.dtype.newbyteorder())  # NumPy 2 safe
             
         skybkg = sep.Background(data_sep)
         data_bkgsub = data_sep - skybkg.back()
