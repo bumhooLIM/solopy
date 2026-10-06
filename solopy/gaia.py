@@ -4,10 +4,19 @@ import astropy.units as u
 from astropy.wcs import WCS
 from scipy.spatial import cKDTree
 
+import json
 import warnings
+from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 from pathlib import Path
+
+# Radius of the nightly Gaia subset around each telescope pointing [deg]:
+# FoV half-diagonal (4096 px * sqrt(2)/2 * 2.98"/px = 2.40 deg) + astrometry.net search radius
+# around the header pointing (2.0 deg, FitsLv1.update_wcs) + 0.1 deg buffer.
+NIGHTLY_SUBSET_RADIUS_DEG = 4.5
+
+
 class GaiaQuery:
 
     @staticmethod
@@ -51,8 +60,188 @@ class GaiaQuery:
             
         return boxes
 
+    # ------------------------------------------------------------------
+    # Nightly subset: one pass over the full catalog per night
+    # ------------------------------------------------------------------
     @staticmethod
-    def query_gaia_subset(wcs_input, 
+    def _as_catalog(gaia_data):
+        """Path -> memory-mapped .npy; DataFrame -> record array; arrays are returned as is."""
+        if isinstance(gaia_data, (str, Path)):
+            try:
+                return np.load(gaia_data, mmap_mode='r')
+            except Exception as e:
+                raise ValueError(f"Failed to load Gaia catalog from {gaia_data}: {e}")
+        if isinstance(gaia_data, pd.DataFrame):
+            return gaia_data.to_records(index=False)
+        return gaia_data
+
+    @staticmethod
+    def _split_ra(ra_min, ra_max, dec_min, dec_max):
+        """Split an RA interval that crosses 0/360 deg into boxes inside [0, 360]."""
+        if ra_max - ra_min >= 360.0:
+            return [[0.0, 360.0, dec_min, dec_max]]
+        if ra_min < 0.0:
+            return [[ra_min + 360.0, 360.0, dec_min, dec_max], [0.0, ra_max, dec_min, dec_max]]
+        if ra_max > 360.0:
+            return [[ra_min, 360.0, dec_min, dec_max], [0.0, ra_max - 360.0, dec_min, dec_max]]
+        return [[ra_min, ra_max, dec_min, dec_max]]
+
+    @staticmethod
+    def cap_boxes(ra_deg, dec_deg, radius_deg):
+        """
+        RA/Dec boxes [ra_min, ra_max, dec_min, dec_max] that contain the spherical cap of
+        `radius_deg` around each (ra, dec). The RA half-width is the exact extent of the cap,
+        arcsin(sin r / cos dec); caps reaching a pole span all RA, and boxes crossing
+        RA = 0/360 are split in two.
+        """
+        ra = np.atleast_1d(np.asarray(ra_deg, dtype=float)) % 360.0
+        dec = np.atleast_1d(np.asarray(dec_deg, dtype=float))
+        sin_r = np.sin(np.radians(radius_deg))
+        boxes = []
+        for a, d in zip(ra, dec):
+            dec_min, dec_max = max(d - radius_deg, -90.0), min(d + radius_deg, 90.0)
+            cos_d = np.cos(np.radians(d))
+            if dec_max >= 90.0 or dec_min <= -90.0 or sin_r >= cos_d:
+                boxes.append([0.0, 360.0, dec_min, dec_max])
+                continue
+            half = np.degrees(np.arcsin(sin_r / cos_d))
+            boxes.extend(GaiaQuery._split_ra(a - half, a + half, dec_min, dec_max))
+        return boxes
+
+    @staticmethod
+    def _footprint_grid(wcs, margin_pix, n_sample):
+        """RA/Dec of an n_sample x n_sample grid over the image expanded by margin_pix."""
+        nx, ny = wcs.pixel_shape
+        xs = np.linspace(-0.5 - margin_pix, nx - 0.5 + margin_pix, n_sample)
+        ys = np.linspace(-0.5 - margin_pix, ny - 0.5 + margin_pix, n_sample)
+        xx, yy = np.meshgrid(xs, ys)
+        ra, dec = wcs.pixel_to_world_values(xx.ravel(), yy.ravel())
+        return np.asarray(ra, dtype=float) % 360.0, np.asarray(dec, dtype=float)
+
+    @staticmethod
+    def wcs_boxes(wcs, margin_pix=60, n_sample=9):
+        """
+        RA/Dec boxes enclosing an image footprint expanded by `margin_pix`. The default 60 px
+        covers the +-10 px edge buffer and the 50 px bright-star radius used by `query_gaia`.
+        """
+        ra, dec = GaiaQuery._footprint_grid(wcs, margin_pix, n_sample)
+        dec_min, dec_max = float(dec.min()), float(dec.max())
+        nx, ny = wcs.pixel_shape
+        for pole_dec in (90.0, -90.0):
+            try:
+                px, py = wcs.world_to_pixel_values(0.0, pole_dec)
+            except Exception:  # e.g. SIP inversion does not converge far from the field
+                continue
+            if np.isfinite(px) and np.isfinite(py) and \
+               -margin_pix <= px <= nx + margin_pix and -margin_pix <= py <= ny + margin_pix:
+                return [[0.0, 360.0, min(dec_min, pole_dec), max(dec_max, pole_dec)]]
+        if ra.max() - ra.min() > 180.0:  # footprint straddles RA = 0
+            ra = np.where(ra > 180.0, ra - 360.0, ra)
+        return GaiaQuery._split_ra(float(ra.min()), float(ra.max()), dec_min, dec_max)
+
+    @staticmethod
+    def in_boxes(boxes, ra_deg, dec_deg):
+        """Boolean array: which (ra, dec) lie inside any box. RA must be in [0, 360)."""
+        ra = np.asarray(ra_deg, dtype=float)
+        dec = np.asarray(dec_deg, dtype=float)
+        inside = np.zeros(ra.shape, dtype=bool)
+        for ra_min, ra_max, dec_min, dec_max in boxes:
+            inside |= (ra >= ra_min) & (ra <= ra_max) & (dec >= dec_min) & (dec <= dec_max)
+        return inside
+
+    @staticmethod
+    def footprint_covered(boxes, wcs, margin_pix=60, n_sample=9):
+        """True if the image footprint (expanded by margin_pix) lies inside the union of boxes."""
+        ra, dec = GaiaQuery._footprint_grid(wcs, margin_pix, n_sample)
+        return bool(GaiaQuery.in_boxes(boxes, ra, dec).all())
+
+    @staticmethod
+    def isolation_flags(ra_deg, dec_deg, radius_arcsec=20.0):
+        """
+        True where the nearest *other* source lies at least `radius_arcsec` away.
+        Same criterion (3-D unit-vector KD-tree) that built gaiadr3_20arcsec.npy.
+        """
+        ra = np.radians(np.asarray(ra_deg, dtype=float))
+        dec = np.radians(np.asarray(dec_deg, dtype=float))
+        if ra.size < 2:
+            return np.ones(ra.size, dtype=bool)
+        xyz = np.column_stack([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)])
+        dist, _ = cKDTree(xyz).query(xyz, k=2, workers=-1)
+        chord = 2.0 * np.sin(np.radians(radius_arcsec / 3600.0) / 2.0)
+        return dist[:, 1] >= chord
+
+    @staticmethod
+    def build_subset(gaia_data, boxes, isolation_arcsec=20.0, chunk_rows=4_000_000):
+        """
+        Extract every catalog row inside `boxes` in ONE sequential pass over a (memory-mapped)
+        catalog, and add a boolean field `iso` (no other catalog source within `isolation_arcsec`).
+
+        Isolation is evaluated inside the subset. That equals the all-sky criterion for every
+        source farther than `isolation_arcsec` from the subset boundary, which holds for all
+        frames because the boxes include a margin of degrees around every field.
+        """
+        gaia_all = GaiaQuery._as_catalog(gaia_data)
+        merged = GaiaQuery._merge_bounding_boxes([[float(v) for v in box] for box in boxes])
+        parts = []
+        for start in range(0, len(gaia_all), chunk_rows):
+            chunk = gaia_all[start:start + chunk_rows]
+            keep = GaiaQuery.in_boxes(merged, chunk['ra'], chunk['dec'])
+            if keep.any():
+                parts.append(np.asarray(chunk[keep]))
+        subset = np.concatenate(parts) if parts else np.asarray(gaia_all[:0])
+
+        names = [name for name in subset.dtype.names if name != 'iso']
+        out = np.empty(len(subset), dtype=[(name, subset.dtype[name]) for name in names] + [('iso', '?')])
+        for name in names:
+            out[name] = subset[name]
+        out['iso'] = GaiaQuery.isolation_flags(subset['ra'], subset['dec'], isolation_arcsec)
+        return out
+
+    @staticmethod
+    def build_nightly_subset(gaia_data, ra_deg, dec_deg,
+                             radius_deg=NIGHTLY_SUBSET_RADIUS_DEG, isolation_arcsec=20.0):
+        """
+        Gaia subset that safely encompasses every field of one night, built before calibration.
+
+        `ra_deg`/`dec_deg` are the telescope pointings (Lv0 header RA/DEC). Every plate-solved
+        footprint lies within `radius_deg` of its pointing (see NIGHTLY_SUBSET_RADIUS_DEG); confirm
+        after Lv1 with `footprint_covered` and extend with `wcs_boxes` if a frame falls outside.
+
+        Returns (subset, boxes). `subset[subset['iso']]` replaces gaiadr3_20arcsec.npy (zero
+        points); the full subset replaces gaiadr3.npy (Lv3 blend check).
+        """
+        points = np.column_stack([np.asarray(ra_deg, dtype=float) % 360.0, np.asarray(dec_deg, dtype=float)])
+        points = points[np.all(np.isfinite(points), axis=1)]
+        if len(points) == 0:
+            raise ValueError("No valid pointings to build a Gaia subset from.")
+        points = np.unique(np.round(points, 2), axis=0)  # 0.01 deg rounding << 0.1 deg buffer
+        boxes = GaiaQuery.cap_boxes(points[:, 0], points[:, 1], radius_deg)
+        return GaiaQuery.build_subset(gaia_data, boxes, isolation_arcsec), boxes
+
+    @staticmethod
+    def save_subset(npy_path, subset, boxes, **meta):
+        """Save a subset as .npy plus a .json sidecar holding its boxes and provenance."""
+        npy_path = Path(npy_path)
+        npy_path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(npy_path, subset)
+        sidecar = {
+            "boxes": [[float(v) for v in box] for box in boxes],
+            "n_sources": int(len(subset)),
+            "n_isolated": int(np.count_nonzero(subset['iso'])),
+            "created_utc": datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            **meta,
+        }
+        npy_path.with_suffix('.json').write_text(json.dumps(sidecar, indent=2, default=str))
+
+    @staticmethod
+    def load_subset(npy_path):
+        """Load a subset saved by `save_subset`. Returns (subset, boxes, metadata)."""
+        npy_path = Path(npy_path)
+        meta = json.loads(npy_path.with_suffix('.json').read_text())
+        return np.load(npy_path), meta["boxes"], meta
+
+    @staticmethod
+    def query_gaia_subset(wcs_input,
                           gaia_data, 
                           gaia_mag_upper_limit=18.0, 
                           gaia_mag_lower_limit=13.0, 

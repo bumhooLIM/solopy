@@ -19,6 +19,10 @@ class FitsLv3:
         """
         Initialize the Level-3 Science Processor.
         Pre-loads heavy orbital and catalog databases to optimize memory.
+
+        `gaia_path` is a path to a Gaia .npy catalog (memory-mapped) or an in-memory catalog.
+        Pass the night's subset from `GaiaQuery.build_nightly_subset`: the blend check
+        cross-matches against every row, so the full 247.5 M-row catalog costs minutes and GBs.
         """
         # 1. Setup Logging (non-propagating, so lines are not repeated by root handlers)
         self.logger = get_logger("FitsLv3", log_file)
@@ -33,10 +37,17 @@ class FitsLv3:
             self.logger.error(f"Failed to load orbit database: {e}")
             raise
             
-        # 3. Load Gaia Catalog
+        # 3. Gaia Catalog (path -> memory map; arrays such as the nightly subset are used as is)
         try:
-            self.logger.info(f"Loading Gaia catalog from {gaia_path}")
-            self.gaia_all = np.load(Path(gaia_path), mmap_mode='r')
+            if isinstance(gaia_path, (str, Path)):
+                self.logger.info(f"Loading Gaia catalog from {gaia_path}")
+                self.gaia_all = np.load(Path(gaia_path), mmap_mode='r')
+            else:
+                self.gaia_all = gaia_path
+            self.logger.info(f"Gaia catalog for blend checks: {len(self.gaia_all):,} sources")
+            if len(self.gaia_all) > 20_000_000:
+                self.logger.warning("Large Gaia catalog passed to FitsLv3; use GaiaQuery.build_nightly_subset "
+                                    "to avoid multi-GB memory use in the blend check.")
         except Exception as e:
             self.logger.error(f"Failed to load Gaia catalog: {e}")
             raise

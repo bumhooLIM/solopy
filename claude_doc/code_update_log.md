@@ -92,3 +92,34 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   `BIASCORR = True` and the bias name, and its level equals dark − bias.
 - **Effect on products:** metadata only. Existing Lv0/Lv1 headers keep `APTDIA = 0.0`, and existing master darks keep
   `BIASCORR = False`, until those steps are re-run. Pixel data and photometry are unaffected.
+
+### CU-006 · Nightly Gaia subset instead of the full catalog (§8 #4)
+
+- **Issue:** the Lv3 blend check passed the full 247.5 M-row `gaiadr3.npy` to `query_nearest_gaia`, which turns it
+  into a DataFrame and SkyCoord (several GB, about 2.3 min per night). Zero points scanned the 61.5 M-row
+  `gaiadr3_20arcsec.npy` for every frame.
+- **Change** (`solopy/gaia.py`, new `GaiaQuery` methods; existing methods unchanged):
+  - `build_nightly_subset(gaia_data, ra, dec, radius_deg=4.5)` is called *before* a night's calibration with the
+    Lv0 telescope pointings. Each pointing gets an exact spherical-cap box (RA-wrap and pole safe), and the full
+    catalog is read in one chunked pass.
+  - Each row gains an `iso` flag (no other source within 20″), using the same KD-tree criterion that built
+    `gaiadr3_20arcsec.npy`. So `subset[subset['iso']]` replaces that file for zero points, and the whole subset
+    replaces `gaiadr3.npy` for the blend check.
+  - Radius 4.5° = FoV half-diagonal 2.40° + astrometry.net search radius 2.0° + 0.1° buffer: any plate-solved field
+    lies inside.
+  - `footprint_covered(boxes, wcs)` and `wcs_boxes(wcs)` verify, and if needed extend, coverage after plate solving.
+    The margin is 60 px, covering `query_gaia`'s 10 px edge buffer and 50 px bright-star radius.
+  - `save_subset` / `load_subset` store `.npy` plus a `.json` sidecar (boxes, counts, provenance).
+  - Helpers: `cap_boxes`, `in_boxes`, `isolation_flags`, `build_subset`.
+  - `solopy/fitslv3.py`: `FitsLv3(orb_path, gaia_path)` also accepts an in-memory catalog (the subset), and warns
+    when given a catalog above 20 M rows.
+- **Verification:**
+  - `tests/test_gaia.py` (10 tests, synthetic sky with RA-wrap and polar cases): caps contain random points; the
+    subset equals a brute-force selection; chunked and single passes agree; `iso` equals the all-sky flag inside
+    fields; `query_gaia` returns the identical star list from the subset and from an all-sky isolated catalog;
+    coverage detection and extension; save/load round trip.
+  - Real data, night 2026_0630: 198 science pointings (11 unique) → 1,119,712 rows (956,235 isolated, 41 MB) in
+    18.8 s. 195/195 Lv1 footprints covered. For 3 frames, zero-point star lists are identical to those from
+    `gaiadr3_20arcsec.npy` (1,750 / 6,292 / 5,975 stars), with query time 0.01 s instead of 0.2–3.5 s.
+- **Effect on products:** none by itself. Zero-point inputs are identical by construction (verified). The driver
+  must call it (see the driver entry).
