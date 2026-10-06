@@ -214,3 +214,39 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - Full suite: 43 tests OK.
 - **Effect on products:** none. The installed editable metadata still reports 1.0.0 until
   `pip install -e . --no-deps` is re-run.
+
+### CU-011 · Versioned nightly driver: nightly Gaia subset, `--levels`, robust file lists (§8 #4, #7, #11; enables #2)
+
+- **Issue:**
+  - The production driver (`~/Desktop/data/solo/notebooks/main.py`) is not under version control, and the repo's
+    `notebooks/main.py` was a stale 2025 example.
+  - Re-running only Lv2/Lv3 (needed to regenerate products, §8 #2) required re-running Lv0/Lv1.
+  - The driver loaded the full Gaia catalogs.
+- **Change:** `notebooks/main.py` is replaced by the production driver with these updates (parameters unchanged:
+  flat `…20260526`, BPM `…20260616`, ZP stars G 13–15, apertures 1.5/3/4 × FWHM):
+  - **Nightly Gaia subset** (#4): built *before* calibration from the Lv0 pointings (`GaiaQuery.build_nightly_subset`)
+    and saved to `GAIA_NIGHTLY_DIR/gaiadr3.<night>.npy` (default `gaia_dr3/nightly/`). It is reloaded on re-runs
+    (`--rebuild-gaia` forces a rebuild). After Lv1, every solved footprint is checked, and the subset is extended
+    if any falls outside. Lv2 uses `subset[iso]`; Lv3 uses the whole subset.
+  - `--levels` (default `0,1,2,3`): for example `--levels 2,3` regenerates zero points and asteroid photometry from
+    existing Lv1 frames.
+  - `--badpix-frac-max` (default 0.05) is passed to Lv2 and Lv3.
+  - Results CSVs gain a `badpix_frac` column. The `update_wcs` → `None` guard now works (#7).
+  - Frame lists come from one helper, `read_summary`, which always yields absolute paths. The old code got them as a
+    side effect of a bare `.filter()` call; a first version of this rewrite lost that and could not open frames,
+    which the smoke test caught.
+  - The driver logs an error, instead of crashing, when a night has no Lv0 or Lv1 science frames.
+  - Optional `directory.py` entries `GAIA_NIGHTLY_DIR` and `ASTROMETRY_CACHE_DIR`; defaults keep the current layout.
+  - `PSFFILE` (driver) and `ZPFILE` (`fitslv2.py`) comments shortened so the cards fit in 80 characters. These
+    truncation warnings were previously hidden by `psf.py`'s global warning filter (removed in CU-009).
+- **Verification:** smoke test on 6 real 2026_0630 frames in a scratch tree (production inputs read only;
+  `--levels 1,2,3`, then `--levels 2,3`): exit 0, no `ERROR` or `WARNING` lines, no duplicated log lines; the subset
+  is built, reused, and covers 6/6 footprints.
+  - Compared with production: Lv1 pixels and masks are bit-identical; `ZP_G` agrees within 0.002 mag (N rises by
+    5–10 % from the 5 % rule); `jd_utc`/`jd_tdb` move by +69.18 s (CU-001); asteroid positions agree to 10⁻⁴ px;
+    non-flagged magnitudes change by a median of −0.0015 mag.
+  - The only large change is (192) Nausikaa (V = 11.1; 12 masked px, 16–26 % of the aperture, still `badphot`):
+    +0.4 to +0.5 mag brighter, because sky is no longer subtracted over masked pixels. This exposes the
+    saturated-core issue raised in CU-008.
+- **Effect on products:** none until deployed. Deploying means copying this file to
+  `~/Desktop/data/solo/notebooks/main.py`, which needs user confirmation.

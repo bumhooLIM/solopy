@@ -27,6 +27,16 @@ pip install -e ".[lv3]"      # adds kete (< 2) and skyloc (from GitHub) for Lv3
 The nightly driver is `notebooks/main.py`. It runs from a folder that also contains `directory.py`, the path
 configuration; in production that folder is `~/Desktop/data/solo/notebooks/`.
 
+```bash
+python main.py -s 2026_0630                  # all levels: 0 headers+masters, 1 WCS+BDF, 2 PSF+ZP, 3 asteroids
+python main.py -s 2026_0630 --levels 2,3     # re-run zero points and asteroid photometry only
+```
+
+Before calibration the driver builds a nightly Gaia subset (`gaia_dr3/nightly/gaiadr3.<night>.npy`) covering every
+field of the night, and uses it instead of the full catalog.
+
+Library use:
+
 ```python
 import solopy
 

@@ -427,7 +427,8 @@ class FitsLv2:
             fits.setval(fpath_fits, 'ZP_G', value=float(zp), comment='Photometric Zeropoint (Gaia G-band)')
             fits.setval(fpath_fits, 'ZPERR_G', value=float(zp_err), comment='Estimated error of the zeropoint')
             fits.setval(fpath_fits, 'ZPSOURCE', value=int(num_sources), comment='Number of sources used for ZP')
-            fits.setval(fpath_fits, 'ZPFILE', value=fpath_out_pq.name, comment='Zero-point catalog file name')
+            # Keep the comment short: the long file name leaves ~13 characters on the 80-char card.
+            fits.setval(fpath_fits, 'ZPFILE', value=fpath_out_pq.name, comment='ZP table')
             
             self.logger.info(f"Updated header ZP={zp:.3f}$\\pm${zp_err:.3f} (N={num_sources})")
         except Exception as e:
