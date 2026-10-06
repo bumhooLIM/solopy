@@ -12,6 +12,7 @@ import kete
 import solopy
 import skyloc as sloc
 from ._timeutil import utc_jd_to_tdb
+from ._logutil import get_logger
 
 class FitsLv3:
     def __init__(self, orb_path, gaia_path, log_file=None):
@@ -19,17 +20,8 @@ class FitsLv3:
         Initialize the Level-3 Science Processor.
         Pre-loads heavy orbital and catalog databases to optimize memory.
         """
-        # 1. Setup Logging
-        self.logger = logging.getLogger("FitsLv3")
-        self.logger.setLevel(logging.INFO)
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-            self.logger.addHandler(handler)
-            if log_file:
-                file_h = logging.FileHandler(log_file)
-                file_h.setFormatter(handler.formatter)
-                self.logger.addHandler(file_h)
+        # 1. Setup Logging (non-propagating, so lines are not repeated by root handlers)
+        self.logger = get_logger("FitsLv3", log_file)
         
         self.logger.info("Initializing Level-3 Processor...")
         

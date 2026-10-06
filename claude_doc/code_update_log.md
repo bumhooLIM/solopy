@@ -29,3 +29,18 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   skyloc mocked, `predict_targets` requests the observer state at JD(UTC) + 69.184 s. Test (b) fails on the old code.
 - **Effect on products:** all Lv3 outputs (`results/solo.summary.*.csv`) and the cleaned light curves have `jd_tdb`
   and `jd_utc` mislabeled or shifted by 69.2 s. **Lv3 must be re-run**; Lv1/Lv2 are unaffected.
+
+### CU-002 · One shared logger helper; no duplicated log lines (§8 #5)
+
+- **Issue:** `FitsLv2.__init__` and `CombMaster.__init__` added a console and a file handler on every instantiation.
+  `FitsLv3` builds its own `FitsLv2`, and the `FitsLv3` logger propagated to the root logger configured by the driver.
+  Together these wrote many log lines twice. `FitsLv0`/`FitsLv1` avoided duplicates, but only by ignoring any
+  `log_file` passed after the first instance.
+- **Change:**
+  - `solopy/_logutil.py` (new): `get_logger(name, log_file)`. It keeps exactly one console handler and at most one
+    file handler, sets `propagate = False`, and swaps the file handler when a new `log_file` is given.
+  - `FitsLv0`, `FitsLv1`, `FitsLv2`, `FitsLv3`, `CombMaster` now call `get_logger`. Format unchanged.
+- **Verification:** `tests/test_logutil.py`: repeated calls keep one handler of each kind; switching files redirects
+  output; `log_file=None` keeps the current file; two `FitsLv2` instances write a message once. The last test fails on
+  the old code.
+- **Effect on products:** none (log formatting only). Future logs no longer repeat lines.

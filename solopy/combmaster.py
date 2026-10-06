@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 from astropy.io import fits
 from astropy.time import Time
@@ -12,6 +11,7 @@ import warnings
 import sep
 from datetime import datetime
 from . import _fileutil
+from ._logutil import get_logger
 
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
 class CombMaster:
@@ -31,18 +31,7 @@ class CombMaster:
             Path to a file where logs should be saved, in addition to
             streaming to the console.
         """
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
-        
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        self.logger.addHandler(handler)
-        
-        if log_file:
-            file_h = logging.FileHandler(log_file)
-            file_h.setFormatter(handler.formatter)
-            self.logger.addHandler(file_h)
+        self.logger = get_logger(self.__class__.__name__, log_file)
 
     def _load_ccd_list(self, file_list):
         """

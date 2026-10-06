@@ -10,6 +10,7 @@ from astropy.coordinates import EarthLocation, AltAz
 import astropy.units as u
 import astrometry
 import ccdproc
+from ._logutil import get_logger
 
 class FitsLv1:
     """
@@ -21,22 +22,9 @@ class FitsLv1:
 
     def __init__(self, log_file: str = None):
         """
-        Configure logging to console and optional file (Jupyter-safe).
+        Configure logging to console and optional file (Jupyter-safe, no duplicate handlers).
         """
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
-        
-        # Defense: Prevent duplicate loggers in Jupyter Notebooks
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-            self.logger.addHandler(handler)
-
-            if log_file:
-                file_h = logging.FileHandler(log_file)
-                file_h.setFormatter(handler.formatter)
-                self.logger.addHandler(file_h)
+        self.logger = get_logger(self.__class__.__name__, log_file)
 
     def update_wcs(self,
                    fpath_fits,

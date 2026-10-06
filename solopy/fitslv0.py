@@ -1,4 +1,3 @@
-import logging
 import bz2
 import shutil
 from astropy.io import fits
@@ -9,6 +8,7 @@ import astropy.units as u
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
+from ._logutil import get_logger
 
 class FitsLv0:
     """
@@ -18,22 +18,8 @@ class FitsLv0:
     """
 
     def __init__(self, log_file: str | None = None):
-
-        # set up console + optional file logging
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
-        
-        # Check if handlers already exist before adding new ones
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-            self.logger.addHandler(handler)
-            
-            if log_file:
-                file_h = logging.FileHandler(log_file)
-                file_h.setFormatter(handler.formatter)
-                self.logger.addHandler(file_h)
+        # console + optional file logging (no duplicate handlers)
+        self.logger = get_logger(self.__class__.__name__, log_file)
 
     def batch_decompress(self, in_dir: Path, out_dir: Path, delete_source=False):
         """

@@ -23,6 +23,7 @@ from photutils.centroids import centroid_1dg, centroid_com
 from astropy.nddata import Cutout2D
 from .region import SOLORegion
 from .gaia import GaiaQuery
+from ._logutil import get_logger
 
 class FitsLv2:
     """
@@ -31,16 +32,8 @@ class FitsLv2:
     """
 
     def __init__(self, log_file: str = None):
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False 
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        self.logger.addHandler(handler)
-        if log_file:
-            file_h = logging.FileHandler(log_file)
-            file_h.setFormatter(handler.formatter)
-            self.logger.addHandler(file_h)
+        # FitsLv3 creates its own FitsLv2, so this must not stack handlers.
+        self.logger = get_logger(self.__class__.__name__, log_file)
 
     def sep_extract_source(self,
                            data,
