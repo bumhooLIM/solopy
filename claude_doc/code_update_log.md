@@ -452,3 +452,17 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - Full suite passes.
 - **Effect on products:** nights 2026_0619 and 2026_0626 can now complete Lv2/Lv3, so they are re-processed as part
   of #2.
+
+### CU-021 · Versioned batch script that keeps tracebacks (supports #2)
+
+- **Issue:** `data/solo/notebooks/run_solopy.sh` calls a bare `python`, which in a non-activated shell is the
+  miniconda base env (no kete/skyloc). It also discards stdout/stderr, which is why the 2026_0619/0626 failures left
+  no trace.
+- **Change:** `notebooks/run_solopy.sh` in the repo:
+  - uses `$HOME/miniconda3/envs/solopy/bin/python` (override: `SOLOPY_PYTHON`);
+  - passes `LEVELS` (default `0,1,2,3`);
+  - writes each night's output to `../log/run_<night>.out`;
+  - prints the exit status and time per night;
+  - runs the same 33 nights.
+- **Verification:** `bash -n` syntax check; the night list is identical to the production script.
+- **Effect on products:** none until deployed with the driver.
