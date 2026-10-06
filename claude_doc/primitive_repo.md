@@ -1,9 +1,33 @@
 # solopy — Primitive Repository Analysis
 
 > **Snapshot:** `main` @ `82036f8` ("fix the photometric bug", 2026-07-04) · package version `1.0.0` · analyzed 2026-10-06
+> **Updated for 1.1.0** (branch `fix-section8`, 2026-10-06): see [What changed in 1.1](#whats-changed-in-11), [`code_update_log.md`](code_update_log.md) (every change, CU-001…), and [`robustness_review.md`](robustness_review.md) (scientific checks). Sections 4–7 describe 1.0.0 unless a 1.1 note says otherwise.
 > **Scope:** every tracked file in this repository, plus how the package is actually used on the data in
 > `~/Desktop/data/solo` and `/Volumes/T7/data/solo` (§9).
 > Numbers quoted in §9 were measured directly from those folders, logs, and FITS headers on 2026-10-06.
+
+## What changed in 1.1
+
+| Area | 1.0.0 | 1.1.0 | CU |
+|---|---|---|---|
+| Time scale for kete | UTC passed as TDB (`jd_utc` 69 s early) | TDB | 001 |
+| Photometry on `main` | crashed on every call since `82036f8` | fixed | 007 |
+| WCS | shifted by (+1, +1) px in every frame | FITS 1-based input to astrometry.net | 012 |
+| Gaia | full 247.5 M-row catalog for blends; 61.5 M for ZP | nightly subset built before calibration (≈1 M rows) | 006, 011 |
+| Lv1 mask | 0/1 | bit mask (`solopy.maskbits`); saturation recorded | 013 |
+| `badphot` | any masked pixel | masked area > 5 %, or any saturated pixel, or masked PSF flux > 5 % | 008, 013, 015 |
+| Masked pixels in an aperture | flux lost | flux restored with a PSF weight | 015 |
+| Flux errors | sky variance counted twice | DAOPHOT form; `mag_err_tot` adds ZP error + floor | 014, 016 |
+| Zero point | one value per frame, field-star color | color term (`ZP_SUN`, `ZPCOLOR`) + local ZP per asteroid (`zp_local`) | 016 |
+| Blends | nearest Gaia star, units mixed | flux from all Gaia stars in the aperture (`contam_frac`) | 019 |
+| Light curves | notebook only | `solopy.lightcurve` (flags, light-time, clipped 5-min bins) | 019 |
+| Dark selection | ignored CCDTEMP | prefers ±1 °C, records `DARKDT` | 017 |
+| Robustness | one diverging PSF fit ended a night silently | failed fits skipped; per-frame errors logged | 020 |
+| Logs | duplicated lines; AppleDouble noise | one handler per logger; `._*` skipped | 002, 003 |
+| Packaging | kete/skyloc needed to import; deps incomplete | lazy `FitsLv3`; full deps, extras `lv3`, `notebooks`; Python ≥ 3.10 | 010 |
+| Driver | unversioned, all levels always | `notebooks/main.py` in the repo; `--levels`, `--badpix-frac-max`, `--rebuild-gaia` | 011 |
+| Provenance | none | `SOLOPYV0/1/2`, `SOLOPYV`, `solopy_version` | 018 |
+| Tests | none | 75 unit tests (`python -m unittest discover -s tests`) | all |
 
 ## Contents
 
@@ -355,6 +379,37 @@ Commented-out legacy code in this file: an older `find_centroid` (1-D Gaussian o
 
 ---
 
+### 4.12 Added in 1.1
+
+| File | Contents |
+|---|---|
+| `solopy/maskbits.py` | Bits of the Lv1 `MASK`: `BADPIX` 1, `SATURATED` 2, `BORDER` 4, `NONPOSITIVE` 8, `BRIGHT_STAR` 16, `TRAIL` 32. Also `SATURATION_ADU` (3800), `BORDER_PIX` (100), `header_cards()`, `has_bits()` |
+| `solopy/zeropoint.py` | `SOLAR_BP_RP` (0.82), `fit_color_term`, `local_zero_points`, `robust_std` |
+| `solopy/lightcurve.py` | `aperture_contamination` (exact Gaussian enclosed flux), `add_quality_flags`, `bin_lightcurve`, `SITE` |
+| `solopy/_logutil.py` | `get_logger`: one console handler and at most one file handler, no propagation |
+| `solopy/_timeutil.py` | `utc_jd_to_tdb` |
+| `solopy/_version.py` | `__version__`, `version_string()` (version + git commit, `.dirty` if uncommitted changes) |
+| `solopy/gaia.py` (new methods) | `build_nightly_subset`, `build_subset`, `cap_boxes`, `wcs_boxes`, `in_boxes`, `footprint_covered`, `isolation_flags`, `save_subset`, `load_subset` |
+| `notebooks/main.py` | the production driver (deployed to `~/Desktop/data/solo/notebooks/` next to `directory.py`) |
+| `tests/` | 14 `unittest` modules, 75 tests, synthetic data only |
+
+Behavior changes in the existing classes:
+
+- **`FitsLv1`:** WCS from 1-based star positions; bit mask with `MASKVER`, `NSATPIX`; dark masters within ±1 °C,
+  recorded as `DARKDT`; `update_wcs` returns `None` when unsolved.
+- **`FitsLv2.perform_photometry`:**
+  - `badphot` = masked area > `badpix_frac_max` (5 %), or any saturated pixel, or masked PSF flux > `psf_lost_max`
+    (5 %), or flux ≤ 0;
+  - flux restored by `1/(1 − psf_lost_frac)`;
+  - DAOPHOT error with `gain`.
+- **`FitsLv2.calculate_zeropoint`:** color term, with `ZP_SUN`, `ZPCOLOR`, `ZPNCOLOR`, and a per-star `zp_star_sun`.
+- **`FitsLv3`:**
+  - TDB times;
+  - accepts the nightly subset;
+  - `extract_sso_photometry(..., zp_dir=…)` adds the local zero point, `mag_err_tot`, and contamination
+    (`contam_frac`, `n_gaia_ap`).
+- **`soloPSF`:** a diverging Gaussian fit marks that star failed instead of raising.
+
 ## 5. FITS header keywords written by the pipeline
 
 | Keyword(s) | Stage | Meaning | Written by |
@@ -371,6 +426,10 @@ Commented-out legacy code in this file: an older `find_centroid` (1-D Gaussian o
 | `PSFFILE PSF_FWHM` | Lv2 | PSF table name; median tile FWHM [px] | `main.py` (driver) |
 | `ZP_G ZPERR_G ZPSOURCE ZPFILE` | Lv2 | Gaia-G zero point, its std, N stars, table name | `FitsLv2.calculate_zeropoint` |
 | `NCOMBINE BKGMED BKGRMS` | masters | number combined; sky level and RMS (flats) | `CombMaster` |
+| `MASKVER MASKB1 … MASKB32 NSATPIX` | Lv1 (1.1) | bit-mask version and bit names; saturated pixel count | `FitsLv1.correct_bdf` |
+| `DARKDT` | Lv1 (1.1) | CCDTEMP(frame) − CCDTEMP(master dark) [°C] | `FitsLv1.correct_bdf` |
+| `ZP_SUN ZPCOLOR ZPNCOLOR` | Lv2 (1.1) | zero point at solar color (BP−RP = 0.82); color slope; stars in the color fit | `FitsLv2.calculate_zeropoint` |
+| `SOLOPYV0 SOLOPYV SOLOPYV1 SOLOPYV2` | all (1.1) | solopy version + git commit that wrote Lv0, the masters, Lv1, Lv2 | each stage |
 
 ---
 
@@ -385,7 +444,24 @@ Commented-out legacy code in this file: an older `find_centroid` (1-D Gaussian o
 
 ---
 
+**New in 1.1:**
+
+- ZP tables add `phot_bp_mean_mag`, `phot_rp_mean_mag`, `bp_rp`, `zp_star_sun`, `zp_clipped`, `badpix_frac`,
+  `saturated`, `nsatpix`, `psf_lost_frac`.
+- Asteroid CSVs add `mag_err_tot`, `badpix_frac`, `saturated`, `psf_lost_frac`, `zp_sun`, `zp_color`, `zp_local`,
+  `zperr_local`, `zp_local_spread`, `zp_local_n`, `zp_local_fallback`, `contam_flux`, `contam_frac`, `n_gaia_ap`,
+  `pixscale`, `solopy_version`.
+- `gmag` uses `zp_local`. `jd_tdb` and `jd_utc` are now correct.
+- Nightly Gaia subsets: `gaia_dr3/nightly/gaiadr3.<night>.npy` + `.json` (fields of `gaiadr3.npy` plus `iso`).
+
 ## 7. Dependencies and environment
+
+**1.1:**
+
+- `pyproject.toml` declares numpy, scipy, pandas, pyarrow, astropy, ccdproc, photutils, sep, astrometry, and tqdm.
+- Extras: `lv3` = `kete>=1.0.8,<2` + skyloc from GitHub; `notebooks` = matplotlib.
+- Python ≥ 3.10. `import solopy` no longer needs kete or skyloc.
+- The table below is the 1.0.0 state.
 
 | Package | In `pyproject.toml` | Imported by | Version in the `solopy` conda env |
 |---|---|---|---|
@@ -419,55 +495,43 @@ External data needed at run time: astrometry.net 4100-series index files (scales
 
 ## 8. Known issues and caveats (code)
 
-Ordered by impact. Line numbers refer to commit `82036f8`.
+Status in 1.1.0. Details: [`code_update_log.md`](code_update_log.md); scientific evidence:
+[`robustness_review.md`](robustness_review.md).
 
-1. **UTC passed where kete expects TDB — light-curve timestamps are 69 s early.**
-   [fitslv3.py:70–75](../solopy/fitslv3.py#L70) passes the header `JD` (UTC, mid-exposure) to
-   `kete.spice.earth_pos_to_ecliptic`, whose docstring says the argument is a TDB Julian date. skyloc then reports
-   that value as `jd_tdb` and derives `jd_utc = jd_tdb − 69.2 s`. Verified on `solo.summary.20260630.csv`:
-   `jd_tdb` equals the header `JD` to within 0.03 s, so `jd_utc` is 69.2 s earlier than the true mid-exposure UTC.
-   The positional effect is negligible (about 1″ of main-belt motion), but `jd_utc` and the derived light-time
-   corrected `jd_ltc` (§9.7) are shifted by about 69 s.
-   Fix: pass `Time(jd, format="jd", scale="utc").tdb.jd`.
-2. **Existing Lv2/Lv3 products predate the latest fix.** Commit `82036f8` (2026-07-04) made `aperture_area` the
-   unmasked area ([fitslv2.py:332–334](../solopy/fitslv2.py#L332)). Everything in `data/solo/{zp,results}` was produced
-   2026-06-21 → 07-03, before that commit. Only sources with `nbadpix > 0` change. Those are removed before the ZP fit
-   and flagged `badphot` in Lv3, so zero points and flag-filtered light curves are unaffected; the raw
-   `badphot = True` rows in the result CSVs are.
-3. **Import-time hard dependencies and incomplete packaging.** `__init__.py` imports `fitslv3`, which needs kete and
-   skyloc; `fitslv2` imports astroquery for commented-out code. None of these are declared, nor are pandas, scipy,
-   tqdm, or pyarrow, while astroalign and matplotlib are declared but unused. `requires-python >= 3.9` is too low
-   ([fitslv0.py:20](../solopy/fitslv0.py#L20) uses `str | None`).
-4. **Full Gaia catalog used for the Lv3 blend check.** [fitslv3.py:106–110](../solopy/fitslv3.py#L106) passes the
-   247.5 M-row `gaiadr3.npy` memmap to `query_nearest_gaia`, which converts all of it to a DataFrame and a SkyCoord.
-   That costs several GB of RAM and about 2.3 min per night in the logs. The notebook version first reduces the
-   catalog with `query_gaia_subset` (about 1.7 M rows).
-5. **Duplicated log lines.** `FitsLv2.__init__` ([fitslv2.py:33–43](../solopy/fitslv2.py#L33)) and
-   `CombMaster.__init__` ([combmaster.py:34–45](../solopy/combmaster.py#L34)) add handlers on every instantiation.
-   `FitsLv3` creates its own `FitsLv2`, and the `FitsLv3` logger does not set `propagate=False`, so with the
-   driver's `logging.basicConfig` many lines appear twice in the log files.
-6. **macOS AppleDouble (`._*`) files.** `batch_decompress` globs `*.fits.bz2` including `._*`
-   ([fitslv0.py:46](../solopy/fitslv0.py#L46)), and `_select_master` scans `*.fits` without `glob_exclude`
-   ([fitslv1.py:313](../solopy/fitslv1.py#L313)). On the exFAT T7 drive these files cause most of the 929 `ERROR`
-   and 5,655 `WARNING` lines in the logs. Current workaround: `/Volumes/T7/data/solo/clean_double.py`.
-7. **An unsolved WCS still returns a path.** `update_wcs` writes `<stem>.wcs.fits` and returns it even without a
-   solution ([fitslv1.py:159–172](../solopy/fitslv1.py#L159)), so the driver's `if not fpath_wcs` guard never fires.
-   The frame is dropped later by `correct_bdf` with `'NoneType' object has no attribute 'to_header'`
-   (80 frames across all logs).
-8. **Header metadata slips.** The raw header key is `APDIA` (279.4 mm), but `update_header` reads `APTDIA`, so it
-   writes `APTDIA = 0.0` ([fitslv0.py:101](../solopy/fitslv0.py#L101)). Master darks keep `BIASCORR = False` even
-   though bias was subtracted. The `comb_master_flat` docstring documents a `filter_name` parameter that does not exist.
-9. **`_select_master` ignores `CCDTEMP`.** It matches on JD (and `EXPTIME`) only. The set point was −10 °C until
-   2026-06-01 and −5 °C from 2026-06-04. This is harmless when a night has its own bias and dark, but nights
-   2026_0602 and 2026_0603 have none. Their frames (taken at −8.5 °C and −7.3 °C) were corrected with masters from
-   06-01 (−10 °C) and 06-04 (−5 °C).
-10. **Centroiding is skipped for zero-point stars** ([fitslv2.py:599–609](../solopy/fitslv2.py#L599), marked "temporary").
-11. **Dead code.** About 280 commented lines in `fitslv2.py`; `_utils.py`; `_ccdutil.py`; `FileCollection`; the stale
-    `notebooks/main.py`. No tests; the README is empty.
-12. **Masking budget (by design).** The fixed 100-px border alone masks 1,598,400 px (9.5 %) of every frame; a typical
-    `NBADPIX` is about 1.67 M.
+| # | Issue found in 1.0.0 | Status in 1.1.0 |
+|---|---|---|
+| 1 | UTC passed where kete expects TDB; `jd_utc` 69 s early | **Fixed** (CU-001) |
+| 2 | Existing Lv2/Lv3 products predate `82036f8` | **Re-processing pending**: `main.py --levels 1,2,3` per night; validated on 2026_0630 |
+| 3 | Import-time hard dependencies; incomplete packaging | **Fixed** (CU-010) |
+| 4 | Full Gaia catalog for the Lv3 blend check | **Fixed**: nightly subset built before calibration (CU-006, CU-011) |
+| 5 | Duplicated log lines | **Fixed** (CU-002) |
+| 6 | macOS AppleDouble (`._*`) files | **Fixed** (CU-003) |
+| 7 | Unsolved WCS still returned a path | **Fixed** (CU-004) |
+| 8 | Header metadata (`APTDIA`, master-dark `BIASCORR`, flat docstring) | **Fixed** (CU-005) |
+| 9 | `_select_master` ignored `CCDTEMP` | **Fixed** (CU-017) |
+| 10 | Zero-point stars use SEP positions, without recentering | Open: adequate (WCS residual rms 0.2–0.3 px) |
+| 11 | Dead code, no tests, empty README, stale `notebooks/main.py` | **Fixed** (CU-009, CU-010, CU-011); 75 tests |
+| 12 | 100-px border mask (9.5 % of pixels) | By design |
 
----
+Found while fixing:
+
+| Issue | Status |
+|---|---|
+| `perform_photometry` returned `None` on every call since `82036f8` (photutils area is a `Quantity`) | **Fixed** (CU-007) |
+| Every Lv1 WCS shifted by (+1, +1) px (0-based stars given to astrometry.net) | **Fixed** (CU-012) |
+| Nights 2026_0619/0626 ended silently on a diverging PSF fit (`NonFiniteValueError`) | **Fixed** (CU-020) |
+| Robustness review R1–R9: saturation, local ZP, color, errors, masked flux, light curves, provenance, dark temperature | **Fixed** (CU-012 to CU-019) |
+
+Remaining caveats:
+
+- The Gaia file stops at G = 18.5, so the contamination estimate cannot see fainter stars. For V = 16.5 targets, a
+  G = 19 star inside the aperture adds 10 % of the flux.
+- After CU-012 the WCS still carries a ~0.4 px offset from astrometry.net's fit to ~40 J2000 index stars. It is
+  harmless for photometry; a Gaia-based refinement would remove it.
+- Unsaturated stars at G < 12 read about 20 mmag bright relative to the 13–15 mag zero-point stars, suggesting a
+  small non-linearity near saturation. Most asteroids that bright are saturated and flagged anyway.
+- The night-sky flat leaves a ±40 mmag illumination pattern. The local zero point absorbs it, but the flat itself is
+  not corrected.
 
 ## 9. Usage in `data/solo` — actual operation
 
@@ -518,6 +582,14 @@ SUMMARY_DIR = WORK_DIR / "summary";                         SLOC_DIR   = WORK_DI
 `WORK_DIR/astrometry_cache` is passed explicitly by `main.py`. `summary/` is currently empty.
 
 ### 9.3 How to execute
+
+**1.1:**
+
+- The driver is versioned as `notebooks/main.py` in the repo and deployed by copying it to this folder.
+- New options: `--levels` (e.g. `--levels 2,3` re-runs Lv2/Lv3 from existing Lv1 frames), `--badpix-frac-max`
+  (default 0.05), `--rebuild-gaia`.
+- Before calibration it builds `gaia_dr3/nightly/gaiadr3.<night>.npy` (≈ 20 s), and reuses it on re-runs.
+- `clean_double.py` is no longer needed.
 
 **Prerequisites**
 

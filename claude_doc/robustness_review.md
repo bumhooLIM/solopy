@@ -160,3 +160,18 @@ in `code_update_log.md`.
    - Otherwise `--levels 2,3`: about 9 h.
    - Lv0 is not touched.
 3. Before the production run, investigate the two nights that stopped during Lv2 (0619, 0626).
+
+## Implementation status (confirmed by the user on 2026-10-06)
+
+| Finding | Implemented in | Notes |
+|---|---|---|
+| R1 saturation | CU-013 | `solopy.maskbits`; Lv1 bit mask; `saturated` always sets `badphot` |
+| R2 local zero point | CU-016 | `zp_local` from stars within 500 px (≥ 10), else the frame value; `zp_local_spread` |
+| R3 color term | CU-016 | `ZP_SUN`/`ZPCOLOR` per frame; asteroids at BP−RP = 0.82 |
+| R4 WCS off-by-one | CU-012 | real re-solve: offset (+0.61, +0.87) → (−0.39, −0.13) px |
+| R5 error model | CU-014, CU-016 | DAOPHOT error (simulation ratio 0.77 → 1.0); `mag_err_tot` with a 0.01 mag floor |
+| R6 masked flux | CU-015 | PSF-weighted restoration; flag above 5 % of the PSF flux |
+| R7 light curves | CU-019 | `solopy.lightcurve`; contamination from all Gaia stars; notebook switch pending review |
+| R8 provenance | CU-018 | `SOLOPYV*`, `solopy_version` |
+| R9 dark temperature | CU-017 | ±1 °C preference, `DARKDT` |
+| Crashed nights 0619/0626 | CU-020 | diverging PSF fit no longer fatal; per-frame errors logged |
