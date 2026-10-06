@@ -482,3 +482,25 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
 - **Verification:** commands, options, file names, and function signatures checked against `notebooks/main.py`,
   `notebooks/run_solopy.sh`, `pyproject.toml`, and the package code. Documentation only.
 - **Effect on products:** none.
+
+## 2026-10-06 · Found by the one-night validation (2026_0630)
+
+### CU-023 · Re-running level 1 no longer leaves duplicate Lv1 frames (supports #2)
+
+- **Issue:** an Lv1 file name encodes the plate-solved field center (`kl4040.sci.lv1.<RA>.<Dec>.<exptime>.<time>`).
+  In the validation run, the WCS fix (CU-012) moved one frame's center across a rounding boundary: `dawn_field6_003`
+  became `…346.n09…084740` instead of `…346.n10…084740`. Re-running level 1 in the production folders would have
+  kept the old file next to the new one, and Lv2/Lv3 would have measured that frame twice, once with the old
+  calibration. A frame that no longer solves would also have kept its outdated Lv1 file.
+- **Change:** `notebooks/main.py`:
+  - `previous_lv1_products()` lists the Lv1 files already in the night folder, grouped by `LV0FILE`;
+  - before each Lv0 frame is reduced again, `remove_lv1_products()` deletes that frame's earlier Lv1 file(s),
+    whatever their name, together with their `psf.<stem>.csv` and `zp.<stem>.parquet`, and logs each deletion;
+  - files made from other Lv0 frames are not touched. Runs with `--levels 2,3` delete nothing.
+- **Verification:**
+  - `tests/test_driver.py` (3 tests): grouping by `LV0FILE`, AppleDouble files ignored, a missing folder, and
+    deletion limited to one frame and its tables. Full suite: 78 tests OK.
+  - 6-frame smoke tree with a planted renamed copy (`…335.n11…`): after `--levels 1,2,3` there are 6 Lv1 files and
+    6 PSF and ZP tables, 7 deletions logged, and 24 result rows on 6 frames with no duplicates.
+- **Effect on products:** none by itself. It makes the reprocessing (#2) safe: about 0.5 % of frames (1 of 195 on
+  2026_0630) are renamed by the WCS fix.

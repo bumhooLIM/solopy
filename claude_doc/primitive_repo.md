@@ -27,7 +27,7 @@
 | Packaging | kete/skyloc needed to import; deps incomplete | lazy `FitsLv3`; full deps, extras `lv3`, `notebooks`; Python ≥ 3.10 | 010 |
 | Driver | unversioned, all levels always | `notebooks/main.py` in the repo; `--levels`, `--badpix-frac-max`, `--rebuild-gaia` | 011 |
 | Provenance | none | `SOLOPYV0/1/2`, `SOLOPYV`, `solopy_version` | 018 |
-| Tests | none | 75 unit tests (`python -m unittest discover -s tests`) | all |
+| Tests | none | 78 unit tests (`python -m unittest discover -s tests`) | all |
 
 ## Contents
 
@@ -391,7 +391,7 @@ Commented-out legacy code in this file: an older `find_centroid` (1-D Gaussian o
 | `solopy/_version.py` | `__version__`, `version_string()` (version + git commit, `.dirty` if uncommitted changes) |
 | `solopy/gaia.py` (new methods) | `build_nightly_subset`, `build_subset`, `cap_boxes`, `wcs_boxes`, `in_boxes`, `footprint_covered`, `isolation_flags`, `save_subset`, `load_subset` |
 | `notebooks/main.py` | the production driver (deployed to `~/Desktop/data/solo/notebooks/` next to `directory.py`) |
-| `tests/` | 14 `unittest` modules, 75 tests, synthetic data only |
+| `tests/` | 15 `unittest` modules, 78 tests, synthetic data only |
 
 Behavior changes in the existing classes:
 
@@ -510,7 +510,7 @@ Status in 1.1.0. Details: [`code_update_log.md`](code_update_log.md); scientific
 | 8 | Header metadata (`APTDIA`, master-dark `BIASCORR`, flat docstring) | **Fixed** (CU-005) |
 | 9 | `_select_master` ignored `CCDTEMP` | **Fixed** (CU-017) |
 | 10 | Zero-point stars use SEP positions, without recentering | Open: adequate (WCS residual rms 0.2–0.3 px) |
-| 11 | Dead code, no tests, empty README, stale `notebooks/main.py` | **Fixed** (CU-009, CU-010, CU-011); 75 tests |
+| 11 | Dead code, no tests, empty README, stale `notebooks/main.py` | **Fixed** (CU-009, CU-010, CU-011); 78 tests |
 | 12 | 100-px border mask (9.5 % of pixels) | By design |
 
 Found while fixing:
@@ -589,6 +589,9 @@ SUMMARY_DIR = WORK_DIR / "summary";                         SLOC_DIR   = WORK_DI
 - New options: `--levels` (e.g. `--levels 2,3` re-runs Lv2/Lv3 from existing Lv1 frames), `--badpix-frac-max`
   (default 0.05), `--rebuild-gaia`.
 - Before calibration it builds `gaia_dr3/nightly/gaiadr3.<night>.npy` (≈ 20 s), and reuses it on re-runs.
+- Re-running level 1 first deletes each frame's Lv1 file from an earlier run (found by `LV0FILE`, whatever its
+  name) and that file's PSF/ZP tables. Lv1 names encode the plate-solved center, so a changed WCS can rename a
+  frame; without this, both versions were used by Lv2/Lv3 (CU-023).
 - `clean_double.py` is no longer needed.
 
 **Prerequisites**
@@ -629,6 +632,7 @@ script is only for re-running Lv3 without Lv0–Lv2.
   result CSVs for the UTC dates in that night.
 - Runtime is about 30–40 min per night on this Mac. For 2026_0630: Lv0 + masters 4 min, Lv1 11 min (198 frames),
   Lv2 11 min, Lv3 5 min.
+  **1.1:** levels 1–3 take 22.5 min for 2026_0630: Gaia subset 19 s, Lv1 11.1 min, Lv2 8.9 min, Lv3 2.2 min.
 
 ### 9.4 Walk-through of one night (2026_0630)
 

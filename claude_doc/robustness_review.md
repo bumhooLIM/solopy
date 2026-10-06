@@ -154,12 +154,10 @@ in `code_update_log.md`.
 ## Reprocessing plan (fix #2)
 
 1. Validate the code on one night (2026_0630) in a scratch tree and compare with the current products.
-2. Reprocess all 33 nights:
-   - `--levels 1,2,3` if R1 or R4 is accepted: about 27 min per night, about 15 h in total. This overwrites the Lv1
-     files on T7 and the PSF/ZP/results tables.
-   - Otherwise `--levels 2,3`: about 9 h.
-   - Lv0 is not touched.
-3. Before the production run, investigate the two nights that stopped during Lv2 (0619, 0626).
+   **Done**; see [Validation on 2026_0630](#validation-on-2026_0630).
+2. Reprocess all 33 nights with `--levels 1,2,3` (R1 and R4 need new Lv1 files): 6.8 s per frame, about 12 h for
+   about 6,200 frames. This overwrites the Lv1 files on T7 and the PSF/ZP/results tables; Lv0 is not touched.
+3. Before the production run, investigate the two nights that stopped during Lv2 (0619, 0626). **Done** (CU-020).
 
 ## Implementation status (confirmed by the user on 2026-10-06)
 
@@ -175,3 +173,25 @@ in `code_update_log.md`.
 | R8 provenance | CU-018 | `SOLOPYV*`, `solopy_version` |
 | R9 dark temperature | CU-017 | ±1 °C preference, `DARKDT` |
 | Crashed nights 0619/0626 | CU-020 | diverging PSF fit no longer fatal; per-frame errors logged |
+| Renamed Lv1 frames on re-runs | CU-023 | found by the validation below |
+
+## Validation on 2026_0630
+
+Levels 1–3 of the 1.1 code were run on 2026_0630 into a scratch tree, reading the production Lv0 frames, masters,
+Gaia catalog and orbits, and compared with the production products of that night (made by 1.0).
+
+| Check | Result |
+|---|---|
+| Run | 198 frames, 195 solved (the 3 `dusk_field3` frames fail in both versions); exit 0, no errors, no duplicate log lines. 22.5 min: Gaia subset 19 s, Lv1 11.1 min, Lv2 8.9 min, Lv3 2.2 min. |
+| Lv1 pixels and mask | Identical to production in 10/10 sampled frames; same masked pixels, now as bits. `NSATPIX` median 4,471; `DARKDT` 0 °C. |
+| Lv1 file names | One frame renamed by the WCS fix (`…346.n10…` → `…346.n09…`). Fixed for re-runs by CU-023. |
+| WCS | Per-frame median SEP − Gaia offset (+1, +1) px → (−0.30, −0.04) px; star scatter 0.30 px. A field pattern remains (x −0.15 to −0.47 px, y +0.20 to −0.17 px across the detector), as expected from a 3rd-order SIP fitted to 50 stars. A 0.5 px aperture offset loses < 0.1 % of the flux, so photometry is unaffected; astrometric use would need a refit against Gaia. |
+| `ZP_G` | Unchanged: median −0.1 mmag (5–95 %: −1.9 to +1.6). Median stars per frame 833 (was 770), because the 5 % rule keeps stars with a few masked pixels. |
+| 5 % rule on stars | 12,186 stars with 0–5 % of the aperture masked agree with 142,111 clean stars within 3 mmag (−2.4 and −3.3 mmag for masked PSF flux ≤ 1 % and 1–5 %); robust scatter 52–53 vs 49 mmag. |
+| Color term | `ZP_SUN − ZP_G` +10.3 mmag; `ZPCOLOR` −0.056 (IQR −0.063 to −0.046). |
+| Systematic floor | 5,809 stars with ≥ 8 visits, calibrated with a leave-one-out local zero point. After removing the statistical and local-ZP errors, the floor is 0.011 mag at G 13–13.5, rising to 0.020 at G 14.5–15. With the 0.01 floor, the median reduced χ² is 0.98 (G 13–14) and 1.04 (G 14–15), against 0.93 expected for about 10 visits: the total errors are within 5–7 % of the observed scatter. **The 0.01 default is kept.** The excess that grows with magnitude points to statistical errors about 5 % too small at the faint end, not to a larger floor. |
+| Lv3 rows | 783 predicted and 780 measured, as in production; 769 rows kept (was 746). The 23 extra rows were lost before because masked pixels drove the old sky-subtracted flux negative; 10 of them are now unflagged (SNR 2.5–11). `jd_utc` +69.18 s (CU-001). |
+| `gmag` change | 628 rows unflagged in both versions: median +8.3 mmag = color term +10.2 mmag (solar color) and local zero point −2.9 mmag; 5–95 % −44 to +56 mmag. Instrumental magnitudes are unchanged. |
+| Errors | `mag_err` 19 % smaller (sky variance no longer counted twice); `mag_err_tot / mag_err` median 1.03. |
+| Flags | `badphot` 15.4 % → 12.6 %. 88 of the 97 flagged rows are saturated: every measurement brighter than V = 12.5 is saturated in 60 s (e.g. (5), (9), (192)), and none at V ≥ 13. `contam_frac` > 2 %: 5.9 %; `zp_local` fallback: 2.7 %. |
+| Light curves | `flag_any` 25.9 % (badphot 12.6, contamination 5.9, low altitude 4.7, ZP spread 2.7, twilight 2.7, ZP error 2.6, low SNR 0.8). 189 five-minute bins of 29 asteroids; 55 points clipped. The old notebook blend rule, with units fixed (`flag_neargaia`, informational), would flag 68 %. |

@@ -100,6 +100,28 @@ def science_frames(summary, keywords_object, name_col):
     return summary[is_science].reset_index(drop=True)
 
 
+def previous_lv1_products(lv1_dir):
+    """Lv1 files already in a night's folder, grouped by the Lv0 file they were made from (LV0FILE)."""
+    if not Path(lv1_dir).is_dir():
+        return {}
+    summary = read_summary(lv1_dir, "*lv1*.fits")
+    if summary.empty or "lv0file" not in summary.columns:
+        return {}
+    previous = {}
+    for fpath, lv0_name in zip(summary["file"], summary["lv0file"]):
+        previous.setdefault(str(lv0_name), []).append(Path(fpath))
+    return previous
+
+
+def remove_lv1_products(fpath_lv1, psf_dir, zp_dir, logger):
+    """Delete an Lv1 file of an earlier run together with the PSF and ZP tables made from it."""
+    fpath_lv1 = Path(fpath_lv1)
+    for fpath in (fpath_lv1, Path(psf_dir) / f"psf.{fpath_lv1.stem}.csv",
+                  Path(zp_dir) / f"zp.{fpath_lv1.stem}.parquet"):
+        fpath.unlink(missing_ok=True)
+    logger.info(f"Removed {fpath_lv1.name} and its PSF/ZP tables from an earlier run.")
+
+
 def load_or_build_gaia_subset(fpath_night, fpath_gaia_all, ra_deg, dec_deg, subdir_name, rebuild, logger):
     """Nightly Gaia subset covering every field of the night (built once, then reused)."""
     if fpath_night.exists() and not rebuild:
@@ -306,8 +328,16 @@ def main(argv=None):
         lv1 = solopy.FitsLv1(log_file=str(fpath_log))
         logger.info(f"Starting Lv1 Processing for {len(lv0_frame)} LIGHT frames...")
 
+        # An Lv1 file name encodes the plate-solved field center, which can change between runs
+        # (2026_0630: one frame renamed after the WCS fix). Delete each frame's earlier Lv1 products
+        # before reducing it again, so that no frame is counted twice and none keeps an old calibration.
+        previous_lv1 = previous_lv1_products(LV1_SUBDIR)
+
         for fpath_fits in lv0_frame:
             try:
+                for fpath_old in previous_lv1.pop(Path(fpath_fits).name, []):
+                    remove_lv1_products(fpath_old, PSF_SUBDIR, ZP_SUBDIR, logger)
+
                 fpath_wcs = lv1.update_wcs(
                     fpath_fits,
                     outdir=LV1_SUBDIR,

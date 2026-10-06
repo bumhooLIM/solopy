@@ -81,6 +81,9 @@ python main.py -s 2026_0630 --levels 2,3
 | `--rebuild-gaia` | off | Rebuild the nightly Gaia subset. |
 | `-d`, `--detector` | `kl4040` | Detector name used in master file names. |
 
+Re-running level 1 replaces the night's earlier Lv1 files, including files renamed because the plate solution
+moved the field center, together with their PSF and zero-point tables.
+
 Before calibration, the driver builds a Gaia subset for the night (`GAIA_DIR/nightly/gaiadr3.<night>.npy`). It
 covers 4.5° around every pointing (about 1 M stars) and is used instead of the 247 M-star catalog.
 
