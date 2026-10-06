@@ -219,7 +219,7 @@ def main(argv=None):
         handlers=[logging.StreamHandler(), logging.FileHandler(str(fpath_log))]
     )
     logger = logging.getLogger("MAIN")
-    logger.info(f"solopy {solopy.__version__}: night {subdir_name}, levels {levels}")
+    logger.info(f"solopy {solopy.version_string()}: night {subdir_name}, levels {levels}")
 
     # ===========================================================================================
     # Fits Lv0 Processing (decompress .bz2 + update headers)
@@ -478,7 +478,8 @@ def main(argv=None):
             'zp_global', 'zperr_global', 'zp_sun', 'zp_color',
             'zp_local', 'zperr_local', 'zp_local_spread', 'zp_local_n', 'zp_local_fallback',
             'gmag', 'gmag_distcorr',
-            'nearest_gaia_source_id', 'nearest_gaia_gmag', 'nearest_gaia_dist_arcsec'
+            'nearest_gaia_source_id', 'nearest_gaia_gmag', 'nearest_gaia_dist_arcsec',
+            'solopy_version'
         ]
 
         final_df = sso_phot_summary[colnames].copy()

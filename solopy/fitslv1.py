@@ -14,6 +14,7 @@ import ccdproc
 from ._logutil import get_logger
 from ._fileutil import APPLEDOUBLE_GLOB
 from . import maskbits
+from ._version import version_string
 
 __all__ = ["FitsLv1"]
 
@@ -267,6 +268,7 @@ class FitsLv1:
             hdr['HISTORY'] = f"({datetime.now().isoformat()}) BDF corrected and masked. (solopy.FitsLv1)"
             hdr['NBADPIX'] = (int(np.count_nonzero(mask_bits)), "Number of bad pixels masked")
             hdr['NSATPIX'] = (int(np.count_nonzero(mask_saturated)), "Number of saturated pixels")
+            hdr['SOLOPYV1'] = (version_string(), 'solopy version of the Lv1 calibration')
             hdr['MASKNAME'] = (ccdmask.meta.get('FILENAME', 'Unknown') if ccdmask else None, "Master mask frame used")
             for key, value, comment in maskbits.header_cards():
                 hdr[key] = (value, comment)

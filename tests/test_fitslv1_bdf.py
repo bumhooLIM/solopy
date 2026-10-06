@@ -67,6 +67,7 @@ class TestCorrectBdfBitMask(unittest.TestCase):
             self.assertTrue(maskbits.has_bits(header))
             self.assertEqual(header["MASKB2"], "SATURATED")
         self.assertEqual(self.hdr["NSATPIX"], 1)
+        self.assertTrue(self.hdr["SOLOPYV1"].startswith("1.1"))       # provenance (review R8)
         self.assertEqual(self.hdr["NBADPIX"], int(np.count_nonzero(self.mask)))
 
 

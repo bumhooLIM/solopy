@@ -12,6 +12,7 @@ from .gaia import GaiaQuery
 from ._logutil import get_logger
 from . import maskbits
 from .zeropoint import SOLAR_BP_RP, fit_color_term
+from ._version import version_string
 
 
 __all__ = ["FitsLv2"]
@@ -523,6 +524,7 @@ class FitsLv2:
             fits.setval(fpath_fits, 'ZP_SUN', value=float(zp_sun), comment='Zeropoint at solar color, BP-RP=0.82')
             fits.setval(fpath_fits, 'ZPCOLOR', value=float(zp_color), comment='dZP/d(BP-RP) [mag/mag]')
             fits.setval(fpath_fits, 'ZPNCOLOR', value=int(n_color), comment='Number of stars in the color fit')
+            fits.setval(fpath_fits, 'SOLOPYV2', value=version_string(), comment='solopy version of the Lv2 zero point')
 
             self.logger.info(f"Updated header ZP={zp:.3f}$\\pm${zp_err:.3f} (N={num_sources}); "
                              f"at solar color {zp_sun:.3f}, color slope {zp_color:+.3f}")

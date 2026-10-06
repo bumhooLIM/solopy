@@ -10,6 +10,7 @@ from pathlib import Path
 from tqdm import tqdm
 from ._logutil import get_logger
 from ._fileutil import is_appledouble
+from ._version import version_string
 
 __all__ = ["FitsLv0"]
 
@@ -170,6 +171,7 @@ class FitsLv0:
                 except Exception as e:
                     self.logger.warning(f"Coordinate calculation failed for {fpath.name}: {e}")
 
+                hdr['SOLOPYV0'] = (version_string(), 'solopy version of the Lv0 header update')
                 hdr['HISTORY'] = f"({datetime.now().isoformat()}) Header updated. (solopy.FitsLv0.update_header)"
 
                 # hdul.flush() is automatically called upon exiting the 'with' block 

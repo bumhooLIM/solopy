@@ -12,6 +12,7 @@ import sep
 from datetime import datetime
 from . import _fileutil
 from ._logutil import get_logger
+from ._version import version_string
 
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
 __all__ = ["CombMaster"]
@@ -278,6 +279,7 @@ class CombMaster:
         # Update metadata
         mbias.meta.update({
             'COMBINED': True,
+            'SOLOPYV': (version_string(), 'solopy version'),
             'NCOMBINE': (len(bias_ccds), "Number of combined frames"),
             'IMAGETYP': 'BIAS',
             'OBSDATE': (obsdate, "YYYYMMDD (UTC)"),
@@ -386,6 +388,7 @@ class CombMaster:
             # Update metadata
             mdark.meta.update({
                 'COMBINED': True,
+            'SOLOPYV': (version_string(), 'solopy version'),
                 'NCOMBINE': (len(bdark_ccds), "Number of combined frames"),
                 'BIASCORR': (True, "Bias corrected?"),
                 'BIASNAME': (fpath_mbias.name, "Master bias frame used"),
@@ -536,6 +539,7 @@ class CombMaster:
         
         mflat.meta.update({
             'COMBINED': True,
+            'SOLOPYV': (version_string(), 'solopy version'),
             'NCOMBINE': len(processed_flats),
             'IMAGETYP': 'FLAT',
             'OBSDATE': (obsdate, "YYYYMMDD (Date file created)"),

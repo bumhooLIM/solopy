@@ -55,6 +55,9 @@ class TestUpdateHeader(unittest.TestCase):
         self.assertEqual(hdr["IMAGETYP"], "LIGHT")
         self.assertNotIn("camera history", str(hdr.get("HISTORY", "")))
 
+    def test_records_solopy_version(self):
+        self.assertTrue(self._update(_raw_header())["SOLOPYV0"].startswith("1.1"))
+
     def test_aperture_read_from_apdia(self):
         # Regression for primitive_repo.md §8 #8 (APTDIA was always written as 0.0).
         self.assertEqual(self._update(_raw_header())["APTDIA"], 279.4)

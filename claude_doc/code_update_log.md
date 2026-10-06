@@ -381,3 +381,16 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - Full suite passes.
 - **Effect on products:** Lv1 headers gain `DARKDT`. Dark selection changes only when a same-exposure master within
   1 °C exists but is not the closest in time.
+
+### CU-018 · Provenance: products record the exact code version (review R8)
+
+- **Issue:** no product recorded which code produced it. That is how the pre-`82036f8` results could only be dated
+  through log timestamps.
+- **Change:**
+  - New `solopy/_version.py`: `__version__` and `version_string()`, e.g. `1.1.0+g6cdcccc`, plus `.dirty` when
+    the checkout has uncommitted changes; the plain version outside git. Exported as `solopy.version_string`.
+  - Written to: Lv0 headers (`SOLOPYV0`), master bias/dark/flat (`SOLOPYV`), Lv1 (`SOLOPYV1`), Lv2 (`SOLOPYV2`),
+    and a `solopy_version` column in the Lv3 results. The driver logs it at start.
+- **Verification:** `tests/test_package.py` checks the format (`x.y.z+g<sha>[.dirty]` in a git checkout).
+  `test_fitslv0`, `test_fitslv1_bdf` and `test_combmaster` check the header stamps. Full suite passes.
+- **Effect on products:** new header keywords and one CSV column. No values change.

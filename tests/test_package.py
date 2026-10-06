@@ -55,6 +55,15 @@ class TestImports(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("FitsLv3", result.stdout)
 
+    def test_version_string_records_git_commit(self):
+        # Robustness review R8: products carry the exact code version.
+        import shutil
+        import solopy
+        v = solopy.version_string()
+        self.assertTrue(v.startswith(solopy.__version__))
+        if shutil.which("git") and (REPO / ".git").exists():
+            self.assertRegex(v, r"^\d+\.\d+\.\d+\+g[0-9a-f]{7,}(\.dirty)?$")
+
     def test_pyproject_is_valid_and_matches_version(self):
         import tomllib
 

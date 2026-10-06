@@ -33,6 +33,8 @@ class TestMasterDark(unittest.TestCase):
             self.assertIs(hdr["BIASCORR"], True)
             self.assertEqual(hdr["BIASNAME"], fpath_bias.name)
             self.assertEqual(fpath_dark.name, "kl4040.dark.60s.comb.20260630.fits")
+            self.assertTrue(hdr["SOLOPYV"].startswith("1.1"))
+            self.assertTrue(fits.getval(fpath_bias, "SOLOPYV").startswith("1.1"))
             self.assertAlmostEqual(float(np.median(fits.getdata(fpath_dark))), 2.0, delta=0.5)
 
 

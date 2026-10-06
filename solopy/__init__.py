@@ -9,7 +9,7 @@ from .psf import soloPSF
 from .region import SOLORegion
 from . import maskbits
 
-__version__ = "1.1.0"
+from ._version import __version__, version_string
 
 # FitsLv3 is left out of __all__ on purpose: `from solopy import *` should not require
 # the optional Level-3 dependencies.

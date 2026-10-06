@@ -13,6 +13,7 @@ from .gaia import GaiaQuery
 from ._timeutil import utc_jd_to_tdb
 from ._logutil import get_logger
 from .zeropoint import local_zero_points
+from ._version import version_string
 
 __all__ = ["FitsLv3"]
 
@@ -241,6 +242,7 @@ class FitsLv3:
             sso_phot_obsid['zp_global'] = row.get('zp_g', np.nan)
             sso_phot_obsid['zperr_global'] = row.get('zperr_g', np.nan)
             sso_phot_obsid['fwhm_global'] = fwhm_global
+            sso_phot_obsid['solopy_version'] = version_string()
 
             # 8. Local zero point at solar color (review R2/R3) and total error (review R5)
             zp_sun = float(hdr.get('ZP_SUN', row.get('zp_g', np.nan)))
