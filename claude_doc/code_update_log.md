@@ -250,3 +250,21 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
     saturated-core issue raised in CU-008.
 - **Effect on products:** none until deployed. Deploying means copying this file to
   `~/Desktop/data/solo/notebooks/main.py`, which needs user confirmation.
+
+---
+
+## 2026-10-06 · Robustness fixes confirmed by the user (`claude_doc/robustness_review.md`)
+
+### CU-012 · WCS was shifted by one pixel (review R4)
+
+- **Issue:** `update_wcs` passed 0-based SEP positions to astrometry.net, which works in FITS 1-based pixels. Every
+  Lv1 WCS was therefore offset by (+1, +1) px (≈ 4″). Gaia − SEP residuals were (+0.68…+0.95, +0.90…+1.32) px in
+  all 811 frames checked.
+- **Change:** `fitslv1.py`: the star list for the solver is `x + 1, y + 1`.
+- **Verification:**
+  - `tests/test_fitslv1_wcs.py`: the solver receives the brightest SEP star at (x + 1, y + 1).
+  - Real solve of `dawn_field1_001_20260630010758`: the median Gaia residual moves from (+0.61, +0.87) px
+    (production WCS) to (−0.39, −0.13) px, a shift of exactly (−1, −1); the rms (0.24, 0.34 px) is unchanged.
+  - The remaining ~0.4 px (≈ 1.2″) comes from astrometry.net's fit to ~40 J2000 index stars. It is well below the
+    FWHM, so asteroid recentering absorbs it; a Gaia-based WCS refinement could remove it later.
+- **Effect on products:** Lv1 WCS (and everything positioned with it) needs Lv1 regeneration.

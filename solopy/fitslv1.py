@@ -74,7 +74,9 @@ class FitsLv1:
             objs = sep.extract(data_sep - bkg.back(), thresh=3.0 * bkg.globalrms, minarea=5)
             # Only take the top 50 brightest stars to speed up the KD-Tree WCS matching
             bright = objs[np.argsort(objs['flux'])[::-1][:50]]
-            coords = np.vstack((bright['x'], bright['y'])).T
+            # astrometry.net works in FITS pixel coordinates (first pixel = 1); SEP is 0-based.
+            # Passing 0-based positions shifted every WCS by (+1, +1) px (robustness review R4).
+            coords = np.vstack((bright['x'] + 1.0, bright['y'] + 1.0)).T
         except Exception as e:
             self.logger.error(f"Source detection failed for {fpath_fits.name}: {e}")
             return None

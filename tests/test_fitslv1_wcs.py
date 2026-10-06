@@ -43,6 +43,7 @@ class _FakeSolver:
         return False
 
     def solve(self, **kwargs):
+        self.stars = np.asarray(kwargs["stars"])
         match = mock.Mock(center_ra_deg=335.0, center_dec_deg=-9.9, scale_arcsec_per_pixel=2.97)
         match.astropy_wcs.return_value = self.wcs
         return mock.Mock(has_match=mock.Mock(return_value=self.solved), best_match=mock.Mock(return_value=match))
@@ -63,9 +64,21 @@ class TestUpdateWcs(unittest.TestCase):
         self.tmp.cleanup()
 
     def _run(self, solved):
-        with mock.patch.object(fitslv1.astrometry, "Solver", lambda files: _FakeSolver(solved, self.wcs)), \
+        self.solver = _FakeSolver(solved, self.wcs)
+        with mock.patch.object(fitslv1.astrometry, "Solver", lambda files: self.solver), \
              mock.patch.object(fitslv1.astrometry.series_4100, "index_files", return_value=[]):
             return fitslv1.FitsLv1().update_wcs(self.fpath, self.dir / "out")
+
+    def test_star_positions_are_passed_in_fits_convention(self):
+        # Regression for robustness review R4: 0-based SEP positions shifted every WCS by (+1, +1) px.
+        import sep
+        self._run(solved=True)
+        data = fits.getdata(self.fpath).astype(np.float32)
+        bkg = sep.Background(data)
+        objs = sep.extract(data - bkg.back(), thresh=3.0 * bkg.globalrms, minarea=5)
+        brightest = objs[np.argmax(objs["flux"])]
+        first = self.solver.stars[0]  # the solver receives stars sorted by flux, brightest first
+        np.testing.assert_allclose(first, [brightest["x"] + 1.0, brightest["y"] + 1.0], atol=1e-6)
 
     def test_unsolved_frame_returns_none_and_writes_nothing(self):
         # Regression for primitive_repo.md §8 #7: the old code wrote <stem>.wcs.fits and returned its path.
