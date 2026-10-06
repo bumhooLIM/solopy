@@ -394,3 +394,40 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
 - **Verification:** `tests/test_package.py` checks the format (`x.y.z+g<sha>[.dirty]` in a git checkout).
   `test_fitslv0`, `test_fitslv1_bdf` and `test_combmaster` check the header stamps. Full suite passes.
 - **Effect on products:** new header keywords and one CSV column. No values change.
+
+### CU-019 · `solopy.lightcurve`: measured contamination, quality flags, robust binning (review R7)
+
+- **Issue:** the light-curve cleaning lived only in `summary_results.ipynb`. There:
+  - the blend flag compared `nearest_gaia_dist_arcsec` with `5*r_ap_pixel` (pixels), and looked only at the
+    nearest star;
+  - 5-min bins had no outlier rejection;
+  - the binned error had no systematic floor;
+  - nothing measured how much light catalogued stars actually add to an aperture.
+- **Change:**
+  - New module `solopy/lightcurve.py`, also exported as `solopy.lightcurve`:
+    - `aperture_contamination(d, F, r_ap, fwhm)`: exact fraction of a Gaussian PSF at distance d inside a circular
+      aperture (noncentral χ², 2 dof).
+    - `add_quality_flags(df, …)`: Sun altitude, light-time-corrected `jd_ltc`, and flags `flag_zperr`,
+      `flag_zpspread` (local zero-point scatter > 0.1 mag), `flag_lowsnr`, `flag_badphot`, `flag_contam`
+      (contamination > 2 % of the asteroid flux), `flag_lowalt`, `flag_twilight`, combined in `flag_any`.
+      - `flag_neargaia` (the notebook's rule with units fixed) is kept as information but excluded from
+        `flag_any`: it flags 41.6 % of measurements, most with no light in the aperture.
+      - For pre-1.1 result files, `contam_frac` is estimated from the nearest Gaia star.
+    - `bin_lightcurve(df, window_min=5, …)`: the notebook's anchor-based 5-min grouping; 3σ (MAD) clipping
+      inside bins of 3+ points; inverse-variance means using √(mag_err² + zperr_local²); bin error
+      √(1/Σw + floor²), so the 0.01 mag floor is added once.
+  - `FitsLv3.extract_sso_photometry` computes, for every measurement, `contam_flux`, `contam_frac` and `n_gaia_ap`
+    from **all** Gaia stars within 60″ of the asteroid (nightly subset, KD-tree, built once), plus `pixscale`.
+    The driver writes these columns.
+- **Verification:** `tests/test_lightcurve.py` (10 tests):
+  - the enclosed fraction matches a 400k-sample Monte Carlo within 0.003 at d = 0–6 px;
+  - Lv3 counts a synthetic G = 16 star 2 px from an asteroid exactly;
+  - the unit-correct legacy rule catches a 30″ neighbor the notebook missed;
+  - light time for 2 au is 998 s;
+  - bins clip a +0.5 mag outlier and add the floor once;
+  - flagged points are excluded.
+  - Real data: in the 6-frame smoke run, a (328) measurement gets 26 % of its flux from a star 16.6″ away and is
+    flagged. Applied to the existing 14,576 results (nearest-star estimate), 6.7 % are contaminated by > 2 %.
+  - Full suite: 74 tests OK.
+- **Effect on products:** new Lv3 columns, and cleaned light curves can now be produced in tested code.
+  `summary_results.ipynb` will be switched to this module after user review.

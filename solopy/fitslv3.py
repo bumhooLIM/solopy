@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial import cKDTree
 import pandas as pd
 from pathlib import Path
 from astropy.io import fits
@@ -13,6 +14,7 @@ from .gaia import GaiaQuery
 from ._timeutil import utc_jd_to_tdb
 from ._logutil import get_logger
 from .zeropoint import local_zero_points
+from .lightcurve import aperture_contamination
 from ._version import version_string
 
 __all__ = ["FitsLv3"]
@@ -257,6 +259,13 @@ class FitsLv3:
                 sso_phot_obsid['mag_err_tot'] = np.sqrt(sso_phot_obsid['mag_err']**2
                                                         + sso_phot_obsid['zperr_local']**2 + sys_floor_mag**2)
 
+            # 9. Flux that catalogued stars add to each aperture (review R7)
+            sso_phot_obsid['pixscale'] = float(hdr.get('PIXSCALE', np.nan))
+            flux, frac, n_near = self._aperture_contamination(sso_phot_obsid, wcs, float(row['exptime']))
+            sso_phot_obsid['contam_flux'] = flux
+            sso_phot_obsid['contam_frac'] = frac
+            sso_phot_obsid['n_gaia_ap'] = n_near
+
             sso_phot_list.append(sso_phot_obsid)
 
         # Final Compilation
@@ -267,6 +276,50 @@ class FitsLv3:
         sso_phot_summary = pd.concat(sso_phot_list, ignore_index=True)
         self.logger.info(f"Successfully extracted {len(sso_phot_summary)} photometric data points.")
         return sso_phot_summary
+
+    def _gaia_lookup(self):
+        """KD-tree (unit vectors) over the Gaia catalog, built once; None for an all-sky catalog."""
+        if not hasattr(self, '_gaia_tree'):
+            self._gaia_tree = None
+            if len(self.gaia_all) > 20_000_000:
+                self.logger.warning("Gaia catalog too large for contamination estimates; pass the nightly subset.")
+            else:
+                ra = np.asarray(self.gaia_all['ra'], dtype=float)
+                dec = np.asarray(self.gaia_all['dec'], dtype=float)
+                r, d = np.radians(ra), np.radians(dec)
+                self._gaia_tree = cKDTree(np.column_stack([np.cos(d) * np.cos(r), np.cos(d) * np.sin(r), np.sin(d)]))
+                self._gaia_radec = (ra, dec)
+                self._gaia_g = np.asarray(self.gaia_all['phot_g_mean_mag'], dtype=float)
+        return self._gaia_tree
+
+    def _aperture_contamination(self, phot, wcs, exptime, search_arcsec=60.0):
+        """
+        Flux that Gaia stars put into each asteroid aperture (Gaussian PSF of the mapped FWHM), the
+        fraction of the asteroid flux it represents, and the number of stars contributing > 0.1 % of
+        their own flux. Star fluxes use the measurement's zero point (G band, color ignored).
+        """
+        n = len(phot)
+        tree = self._gaia_lookup()
+        if tree is None or n == 0:
+            return np.full(n, np.nan), np.full(n, np.nan), np.zeros(n, dtype=int)
+        r, d = np.radians(phot['ra'].to_numpy(dtype=float)), np.radians(phot['dec'].to_numpy(dtype=float))
+        xyz = np.column_stack([np.cos(d) * np.cos(r), np.cos(d) * np.sin(r), np.sin(d)])
+        neighbours = tree.query_ball_point(xyz, 2.0 * np.sin(np.radians(search_arcsec / 3600.0) / 2.0))
+        zp = (phot['zp_local'] if 'zp_local' in phot else phot['zp_global']).to_numpy(dtype=float)
+        flux = np.zeros(n)
+        n_near = np.zeros(n, dtype=int)
+        for k, idx in enumerate(neighbours):
+            if not idx:
+                continue
+            sx, sy = wcs.world_to_pixel_values(self._gaia_radec[0][idx], self._gaia_radec[1][idx])
+            dist = np.hypot(sx - phot['x_winpos'].iloc[k], sy - phot['y_winpos'].iloc[k])
+            star_flux = exptime * 10 ** (-0.4 * (self._gaia_g[idx] - zp[k]))
+            inside = aperture_contamination(dist, star_flux, phot['r_ap_pixel'].iloc[k], phot['mapped_fwhm'].iloc[k])
+            flux[k] = np.nansum(inside)
+            n_near[k] = int(np.sum(inside > 1e-3 * star_flux))
+        source = phot['source_sum'].to_numpy(dtype=float)
+        frac = np.where(source > 0, flux / np.where(source > 0, source, 1.0), np.nan)
+        return flux, frac, n_near
 
     def _local_zero_points(self, fpath_zp, hdr, x, y, zp_sun, radius, min_stars):
         """Local zero points at (x, y) from a frame's Lv2 table; global fallback when unavailable."""

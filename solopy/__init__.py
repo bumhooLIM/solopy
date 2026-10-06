@@ -7,7 +7,7 @@ from .combmaster import CombMaster
 from .gaia import GaiaQuery, NIGHTLY_SUBSET_RADIUS_DEG
 from .psf import soloPSF
 from .region import SOLORegion
-from . import maskbits
+from . import maskbits, zeropoint, lightcurve
 
 from ._version import __version__, version_string
 
@@ -15,7 +15,7 @@ from ._version import __version__, version_string
 # the optional Level-3 dependencies.
 __all__ = [
     "FitsLv0", "FitsLv1", "FitsLv2", "CombMaster",
-    "GaiaQuery", "NIGHTLY_SUBSET_RADIUS_DEG", "soloPSF", "SOLORegion", "maskbits",
+    "GaiaQuery", "NIGHTLY_SUBSET_RADIUS_DEG", "soloPSF", "SOLORegion", "maskbits", "zeropoint", "lightcurve",
 ]
 
 

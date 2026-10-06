@@ -479,6 +479,7 @@ def main(argv=None):
             'zp_local', 'zperr_local', 'zp_local_spread', 'zp_local_n', 'zp_local_fallback',
             'gmag', 'gmag_distcorr',
             'nearest_gaia_source_id', 'nearest_gaia_gmag', 'nearest_gaia_dist_arcsec',
+            'contam_flux', 'contam_frac', 'n_gaia_ap', 'pixscale',
             'solopy_version'
         ]
 
