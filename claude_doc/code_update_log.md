@@ -362,3 +362,22 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
     point from up to 54 stars, `zperr_local` ≈ 0.009 mag.
 - **Effect on products:** asteroid magnitudes move by the local and color corrections (typically ±0.03 mag; 5–95 %
   range −0.064…+0.056 mag in the review). Needs Lv2/Lv3 re-run.
+
+### CU-017 · Prefer master darks at the frame's CCD temperature (review R9)
+
+- **Issue:** `_select_master` ignored `CCDTEMP`. Nights 2026_0602 and 0603, which have no darks, were corrected with
+  masters at −10 °C and −5 °C while their frames were at −8.5 °C and −7.3 °C. The photometric impact is negligible
+  (≈ 2 ADU of dark per 60 s against ≈ 800 ADU of sky), but the mismatch was silent.
+- **Change:** `fitslv1.py`:
+  - `_select_master(..., ccdtemp=None, max_dtemp=1.0)` keeps the closest-EXPTIME rule, then prefers masters within
+    1 °C of the frame. If none qualifies, it uses the closest in time and logs a warning. The difference is stored
+    in `self.master_dtemp`.
+  - `correct_bdf` passes the frame's `CCDTEMP` for darks and writes `DARKDT` = CCDTEMP(frame) − CCDTEMP(master)
+    to the Lv1 header.
+- **Verification:** `tests/test_select_master.py`:
+  - a −5.3 °C frame takes the −5 °C master although a −10 °C master is closer in time (`DARKDT` = −0.3);
+  - a −7.5 °C frame, with nothing within 1 °C, gets the closest in time, a warning, and `DARKDT` = +2.5;
+  - without a temperature the old behavior is unchanged.
+  - Full suite passes.
+- **Effect on products:** Lv1 headers gain `DARKDT`. Dark selection changes only when a same-exposure master within
+  1 °C exists but is not the closest in time.

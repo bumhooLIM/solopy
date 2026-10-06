@@ -1,6 +1,7 @@
 import logging
 import sep
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from datetime import datetime
 from astropy.io import fits
@@ -199,7 +200,11 @@ class FitsLv1:
 
         try:
             mbias = self._select_master(masterdir, 'BIAS', hdr.get('JD', 0))
-            mdark = self._select_master(masterdir, 'DARK', hdr.get('JD', 0), hdr.get('EXPTIME'))
+            mdark = self._select_master(masterdir, 'DARK', hdr.get('JD', 0), hdr.get('EXPTIME'),
+                                        ccdtemp=hdr.get('CCDTEMP'))
+            hdr['DARKDT'] = (round(self.master_dtemp.get('DARK', np.nan), 3)
+                             if np.isfinite(self.master_dtemp.get('DARK', np.nan)) else None,
+                             '[C] CCDTEMP(frame) - CCDTEMP(master dark)')
         except Exception as e:
             self.logger.error(f"Failed to load master frames for {fpath_fits.name}: {e}")
             return None
@@ -307,8 +312,17 @@ class FitsLv1:
         if return_fpath:
             return fpath_out
 
-    def _select_master(self, masterdir, imagetyp, jd_target, exptime=None):
+    def _select_master(self, masterdir, imagetyp, jd_target, exptime=None, ccdtemp=None, max_dtemp=1.0):
+        """
+        Master frame of type `imagetyp`: closest EXPTIME (if given), then closest JD.
+        With `ccdtemp`, masters within `max_dtemp` deg C are preferred (robustness review R9); if
+        none qualifies, the closest in time is used with a warning. The difference
+        CCDTEMP(frame) - CCDTEMP(master) is stored in `self.master_dtemp[imagetyp]` (NaN if unknown).
+        """
         masterdir = Path(masterdir)
+        if not hasattr(self, 'master_dtemp'):
+            self.master_dtemp = {}
+        self.master_dtemp[imagetyp] = np.nan
         
         # Cache the ImageFileCollection DataFrame to prevent massive I/O bottlenecks
         # Make sure self._master_cache = {} is in __init__
@@ -356,11 +370,24 @@ class FitsLv1:
         if df.empty:
             raise FileNotFoundError(f"No matching master {imagetyp} frame found.")
 
+        # Prefer masters taken at the frame's CCD temperature (review R9)
+        temp_col = 'ccdtemp' if 'ccdtemp' in df.columns else 'CCDTEMP' if 'CCDTEMP' in df.columns else None
+        if ccdtemp is not None and temp_col:
+            temps = pd.to_numeric(df[temp_col], errors='coerce')
+            within = df[(temps - float(ccdtemp)).abs() <= max_dtemp]
+            if within.empty:
+                self.logger.warning(f"No master {imagetyp} within {max_dtemp:.1f} C of CCDTEMP={float(ccdtemp):.2f} C; "
+                                    "using the closest in time.")
+            else:
+                df = within
+
         # SAFELY fetch filename using Pandas index label lookup (solves the array mismatch bug)
         idx = df['diff'].idxmin()
         filename = df.loc[idx, 'file']
         selected_file = masterdir / filename
-        
+        if ccdtemp is not None and temp_col:
+            self.master_dtemp[imagetyp] = float(ccdtemp) - float(pd.to_numeric(df.loc[idx, temp_col], errors='coerce'))
+
         self.logger.info(f"Selected master {imagetyp}: {selected_file.name}")
         
         try:
