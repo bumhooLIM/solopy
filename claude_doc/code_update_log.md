@@ -73,3 +73,22 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
 - **Verification:** `tests/test_fitslv1_wcs.py` replaces astrometry.net with a fake solver. Unsolved: `None` and no
   file (this test fails on the old code). Solved: a path whose header has `RACEN`, `ALTCEN`, `PIXSCALE`, `LV0FILE`.
 - **Effect on products:** none. The same frames are dropped, now at the intended place with a clear log message.
+
+### CU-005 · Header metadata fixes (§8 #8)
+
+- **Issue:**
+  - The camera writes the aperture diameter as `APDIA` (279.4 mm), but `FitsLv0.update_header` read `APTDIA`, so
+    every frame got `APTDIA = 0.0`.
+  - Master darks kept `BIASCORR = False` although `comb_master_dark` subtracts a master bias.
+  - The `comb_master_flat` docstring documented a `filter_name` parameter that does not exist, and the method
+    assigned `IMAGETYP` twice.
+- **Change:**
+  - `fitslv0.py`: `APTDIA` falls back to `APDIA` when missing or ≤ 0. This also repairs files the old code set to
+    0.0, because the header update is re-runnable.
+  - `combmaster.py`: master darks record `BIASCORR = True` and `BIASNAME`. The flat docstring now describes the real
+    parameters and the naming (filter from `FILTER`, date = creation day); the duplicate assignment is removed.
+- **Verification:** `tests/test_fitslv0.py` (5 tests: mid-exposure timestamps, normalization, `APDIA` fallback,
+  repair of `APTDIA = 0`, idempotency). `tests/test_combmaster.py`: a master dark built from synthetic frames carries
+  `BIASCORR = True` and the bias name, and its level equals dark − bias.
+- **Effect on products:** metadata only. Existing Lv0/Lv1 headers keep `APTDIA = 0.0`, and existing master darks keep
+  `BIASCORR = False`, until those steps are re-run. Pixel data and photometry are unaffected.

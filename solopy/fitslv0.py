@@ -85,7 +85,11 @@ class FitsLv0:
                 hdr['CCDTEMP']  = (float(hdr.get('CCDTEMP', 0.0)), '[C] CCD Temperature')
                 hdr['PIXSZ']    = (float(hdr.get('PIXSZ', 0.0)), '[micron] Pixel Size')
                 hdr['FOCALLEN'] = (float(hdr.get('FOCALLEN', 0.0)), '[mm] Telescope Focal Length')
-                hdr['APTDIA']   = (float(hdr.get('APTDIA', 0.0)), '[mm] Telescope Aperture Diameter')
+                # The camera software writes the aperture as APDIA; runs before v1.1 left APTDIA = 0.0.
+                aptdia = float(hdr.get('APTDIA', 0.0) or 0.0)
+                if aptdia <= 0 and 'APDIA' in hdr:
+                    aptdia = float(hdr['APDIA'])
+                hdr['APTDIA']   = (aptdia, '[mm] Telescope Aperture Diameter')
                 hdr['FOCUS']    = (int(hdr.get('FOCUS', 0)), 'Focuser Focal Position')
                 hdr['OBSERVER'] = (str(hdr.get('OBSERVER', '')).upper(), 'Observer')
                 hdr['IMAGETYP'] = (str(hdr.get('IMAGETYP', '')).upper(), 'Image Type')

@@ -384,6 +384,8 @@ class CombMaster:
             mdark.meta.update({
                 'COMBINED': True,
                 'NCOMBINE': (len(bdark_ccds), "Number of combined frames"),
+                'BIASCORR': (True, "Bias corrected?"),
+                'BIASNAME': (fpath_mbias.name, "Master bias frame used"),
                 'IMAGETYP': 'DARK',
                 'OBSDATE': (obsdate, "YYYYMMDD (UTC)"),
                 'OBJECT': fpath_mdark.stem,
@@ -422,9 +424,6 @@ class CombMaster:
             Directory to search for master bias/darks and to save the master flat.
         outname : str
             Base name for the output file (e.g., 'camera_serial').
-        filter_name : str
-            The name of the filter (e.g., 'R', 'G', 'B') for this flat.
-            This will be included in the output filename and metadata.
         key_exptime : str, optional
             The FITS header keyword for exposure time (default 'EXPTIME').
 
@@ -432,7 +431,10 @@ class CombMaster:
         -------
         Path or None
             The Path to the created master flat file, or None if
-            the combination failed.
+            the combination failed. The file is named
+            ``{outname}.flat.{filter}.comb.{YYYYMMDD}.fits``, where the filter
+            comes from the ``FILTER`` keyword of the inputs and the date is the
+            day the master was created (not an observation date).
         """
         self.logger.info(f"Starting master flat creation...")
         master_dir = Path(master_dir)
@@ -490,7 +492,6 @@ class CombMaster:
                 bdmflat = self._ccd_sigmaclip(bdflat, nsigma=2.5)
                 
                 # Add to processed list
-                bdmflat.meta['IMAGETYP'] = fpath.name
                 bdmflat.meta['IMAGETYP'] = 'FLAT'
                 bdmflat.write(TMPDIR / fpath.name, overwrite=True)
                 
