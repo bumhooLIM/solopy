@@ -220,7 +220,7 @@ class FitsLv3:
                 base_tile_size=base_tile_size,
                 ap_in_out=ap_in_out,
                 x_col='x_winpos', y_col='y_winpos',
-                badpix_frac_max=badpix_frac_max
+                badpix_frac_max=badpix_frac_max, gain=egain
             )
             
             if sso_phot_obsid is None or sso_phot_obsid.empty:

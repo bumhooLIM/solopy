@@ -293,3 +293,18 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - `tests/test_photometry.py`: one saturated core pixel (2.3 % of the aperture) flags the source; one hot pixel
     there does not. Full suite passes.
 - **Effect on products:** needs Lv1 regeneration, so the masks carry the bits, then Lv2/Lv3.
+
+### CU-014 · Photometric error model counts each noise term once (review R5, part 1)
+
+- **Issue:** `source_sum_err² = aperture_sum_err² + A·σ_sky² + A²σ_sky²/N_sky`. The first term (the variance map
+  summed over the aperture) already contains sky Poisson noise and read noise, so the sky was counted twice.
+  - In a noise simulation of a faint, sky-dominated star, the reported error was 30 % too large (observed/reported
+    = 0.77). That inflated `mag_err` and deflated `snr`.
+- **Change:** `FitsLv2.perform_photometry(..., gain=None)`:
+  - with `gain`: σ² = F/g + A·σ_sky²·(1 + A/N_sky), the DAOPHOT form, with the measured annulus noise;
+  - without `gain`: σ² = Σ(variance map) + A²σ_sky²/N_sky;
+  - `calculate_zeropoint` and `FitsLv3` pass `EGAIN`.
+- **Verification:** `tests/test_photometry.py`: over 300 noise realizations, the flux scatter divided by the
+  reported error is within 1 ± 0.12 in both modes. The pre-fix formula gives 0.77 on the same simulation.
+- **Effect on products:** `mag_err` and `snr` change (≈ −20 to −30 % errors for faint, sky-dominated sources).
+  Systematic errors are added separately in Lv3 (`mag_err_tot`, CU-016). Needs Lv2/Lv3 re-run.

@@ -176,7 +176,8 @@ class FitsLv2:
                            ap_in_out=(2.5, 4.0, 6.0),
                            x_col='x', y_col='y',
                            remove_bad_sources=False,
-                           badpix_frac_max=0.05):
+                           badpix_frac_max=0.05,
+                           gain=None):
         """
         Perform fast, science-grade spatially varying aperture photometry.
         Automatically scales aperture radii per-region using GroupBy optimizations.
@@ -189,6 +190,11 @@ class FitsLv2:
 
         `mask` may be boolean or an Lv1 bit mask (`solopy.maskbits`); saturation can only
         be recognized from a bit mask.
+
+        Flux errors [ADU] count every noise term once (robustness review R5):
+        with `gain` [e-/ADU], var = F/gain + A*sky_std**2 * (1 + A/n_sky), where the sky
+        noise measured in the annulus includes read noise; without `gain`, the pixel
+        variance map `err` summed over the aperture replaces the first two terms.
         """
         try:
             # 1. Map Sources to Regional FWHM
@@ -284,13 +290,22 @@ class FitsLv2:
                 
                 phot_table['source_sum'] = phot_table['aperture_sum'] - (ap_area * msky)
                 
-                ap_sum_err_sq = phot_table['aperture_sum_err']**2 if 'aperture_sum_err' in phot_table.colnames else 0.0
-                
+                # Uncertainty of the sky level subtracted over the aperture
                 sky_mean_err_term = np.zeros_like(msky, dtype=float)
                 valid_nsky = nsky > 0
                 sky_mean_err_term[valid_nsky] = (ap_area[valid_nsky]**2 * ssky[valid_nsky]**2) / nsky[valid_nsky]
-                
-                phot_table["source_sum_err"] = np.sqrt(ap_sum_err_sq + (ap_area * ssky**2) + sky_mean_err_term) 
+
+                # Pixel noise inside the aperture, counted once. The old formula added the variance
+                # map (which already holds sky + read noise) to A*sky_std**2 and double-counted the sky.
+                if gain is not None:
+                    source_flux = np.clip(np.asarray(phot_table['source_sum'], dtype=float), 0, None)
+                    pixel_var = source_flux / float(gain) + ap_area * ssky**2
+                elif 'aperture_sum_err' in phot_table.colnames:
+                    pixel_var = np.asarray(phot_table['aperture_sum_err'], dtype=float)**2
+                else:
+                    pixel_var = ap_area * ssky**2
+
+                phot_table["source_sum_err"] = np.sqrt(pixel_var + sky_mean_err_term)
                 
                 phot_table["snr"] = phot_table["source_sum"] / phot_table["source_sum_err"]
                 
@@ -417,7 +432,7 @@ class FitsLv2:
             base_tile_size=base_tile_size,  # NEW: Pass tile size
             ap_in_out=ap_in_out,            # NEW: Dynamic Multipliers
             x_col='x', y_col='y', remove_bad_sources=True,
-            badpix_frac_max=badpix_frac_max
+            badpix_frac_max=badpix_frac_max, gain=egain
         )
         
         if phot is None or phot.empty:

@@ -83,6 +83,24 @@ class TestPerformPhotometry(unittest.TestCase):
         self.assertEqual(row["badpix_frac"], 0.0)
         self.assertFalse(row["badphot"])
 
+    # --- error model (robustness review R5) ---
+    def _error_ratio(self, **kwargs):
+        """Observed scatter of the flux over noise realizations / reported error (should be ~1)."""
+        sums, errs = [], []
+        for seed in range(300):
+            data, err, src = _scene(flux=2000.0, seed=1000 + seed)   # faint, sky-dominated star
+            row = self.lv2.perform_photometry(data, src, exptime=60.0, err=err, mask=None, fwhm=2.5,
+                                              ap_in_out=(1.5, 3.0, 4.0), **kwargs).iloc[0]
+            sums.append(row["source_sum"]); errs.append(row["source_sum_err"])
+        return np.std(sums) / np.median(errs)
+
+    def test_errors_match_scatter_with_gain(self):
+        # The old formula double-counted the sky and gave a ratio of ~0.76 here.
+        self.assertAlmostEqual(self._error_ratio(gain=GAIN), 1.0, delta=0.12)
+
+    def test_errors_match_scatter_with_variance_map(self):
+        self.assertAlmostEqual(self._error_ratio(), 1.0, delta=0.12)
+
     # --- saturation from the Lv1 bit mask (robustness review R1) ---
     def test_single_saturated_pixel_always_flags(self):
         from solopy import maskbits
