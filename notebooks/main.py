@@ -307,30 +307,34 @@ def main(argv=None):
         logger.info(f"Starting Lv1 Processing for {len(lv0_frame)} LIGHT frames...")
 
         for fpath_fits in lv0_frame:
-            fpath_wcs = lv1.update_wcs(
-                fpath_fits,
-                outdir=LV1_SUBDIR,
-                cache_directory=ASTROMETRY_CACHE_DIR,
-                return_fpath=True
-            )
+            try:
+                fpath_wcs = lv1.update_wcs(
+                    fpath_fits,
+                    outdir=LV1_SUBDIR,
+                    cache_directory=ASTROMETRY_CACHE_DIR,
+                    return_fpath=True
+                )
 
-            # update_wcs returns None when the frame has no astrometric solution
-            if not fpath_wcs:
-                logger.warning(f"Skipping BDF correction for {Path(fpath_fits).name} due to WCS failure.")
-                continue
+                # update_wcs returns None when the frame has no astrometric solution
+                if not fpath_wcs:
+                    logger.warning(f"Skipping BDF correction for {Path(fpath_fits).name} due to WCS failure.")
+                    continue
 
-            fpath_bdf = lv1.correct_bdf(
-                fpath_wcs,
-                outdir=LV1_SUBDIR,
-                masterdir=MASTER_DIR,
-                ccdmflat=mflat,
-                ccdmask=ccdmask,
-                return_fpath=True
-            )
+                fpath_bdf = lv1.correct_bdf(
+                    fpath_wcs,
+                    outdir=LV1_SUBDIR,
+                    masterdir=MASTER_DIR,
+                    ccdmflat=mflat,
+                    ccdmask=ccdmask,
+                    return_fpath=True
+                )
 
-            # Clean up intermediate WCS file
-            if fpath_wcs.exists():
-                fpath_wcs.unlink()
+                # Clean up intermediate WCS file
+                if fpath_wcs.exists():
+                    fpath_wcs.unlink()
+            except Exception:
+                # One bad frame must not end the night: log the traceback and continue
+                logger.exception(f"Lv1 failed for {Path(fpath_fits).name}; continuing with the next frame.")
 
         logger.info(f"Level-1 processing completed.")
 
@@ -368,61 +372,65 @@ def main(argv=None):
         logger.info(f"Starting Lv2 Processing for {len(lv1_science_files)} science frames...")
 
         for fpath_fits in map(Path, lv1_science_files):
-
-            # ---------------------------------------------------------
-            # STEP 1: Spatial PSF Calculation
-            # ---------------------------------------------------------
-            logger.info(f"Calculating spatial PSF for {fpath_fits.name}...")
-
             try:
-                data = fits.getdata(fpath_fits).astype(np.float32)
-            except Exception as e:
-                logger.error(f"Failed to load image data for {fpath_fits.name}: {e}")
-                continue
 
-            psf_df = psf_processor.process_ccd(data)
-
-            if psf_df is None or psf_df.empty:
-                logger.warning(f"PSF evaluation failed for {fpath_fits.name}. Falling back to default FWHM=2.5")
-                overall_fwhm = 2.5
-                psf_table_pass = None
-            else:
-                # We use median instead of mean here to guard against bad regions skewing the header
-                overall_fwhm = float(psf_df['fwhm_avg'].median())
-                psf_table_pass = psf_df.copy()
-
-                # Save PSF table to CSV (dropping the 2D array)
-                fpath_out_psf = PSF_SUBDIR / f"psf.{fpath_fits.stem}.csv"
-                psf_df_save = psf_df.drop(columns=['avg_psf_data'])
-                psf_df_save.to_csv(fpath_out_psf, index=False)
-                logger.info(f"Saved spatial PSF catalog to {fpath_out_psf.name}")
+                # ---------------------------------------------------------
+                # STEP 1: Spatial PSF Calculation
+                # ---------------------------------------------------------
+                logger.info(f"Calculating spatial PSF for {fpath_fits.name}...")
 
                 try:
-                    with fits.open(fpath_fits, mode='update') as hdul:
-                        hdul[0].header['PSFFILE'] = (fpath_out_psf.name, 'PSF table')  # short: fits on the card
-                        hdul[0].header['PSF_FWHM'] = (overall_fwhm, '[pixels] Median field PSF FWHM')
-                        hdul.flush()
+                    data = fits.getdata(fpath_fits).astype(np.float32)
                 except Exception as e:
-                    logger.error(f"Failed to write PSF_FWHM header to {fpath_fits.name}: {e}")
+                    logger.error(f"Failed to load image data for {fpath_fits.name}: {e}")
+                    continue
 
-            # ---------------------------------------------------------
-            # STEP 2: Zero Point Calculation (Spatially Varying)
-            # ---------------------------------------------------------
-            success = lv2.calculate_zeropoint(
-                fpath_fits=fpath_fits,
-                gaia_data=gaia_isolated,
-                outdir_zp=ZP_SUBDIR,
-                mag_lower=13.0,
-                mag_upper=15.0,
-                psf_table=psf_table_pass,       # Pass the DataFrame to the photometer
-                base_tile_size=500,             # Keep synchronized with soloPSF
-                fallback_fwhm=overall_fwhm,     # Used if a specific region failed to fit
-                ap_in_out=(1.5, 3.0, 4.0),      # Standard dynamic FWHM multipliers
-                badpix_frac_max=args.badpix_frac_max
-            )
+                psf_df = psf_processor.process_ccd(data)
 
-            if not success:
-                logger.warning(f"Failed to generate Level-2 Zero Point for {fpath_fits.name}")
+                if psf_df is None or psf_df.empty:
+                    logger.warning(f"PSF evaluation failed for {fpath_fits.name}. Falling back to default FWHM=2.5")
+                    overall_fwhm = 2.5
+                    psf_table_pass = None
+                else:
+                    # We use median instead of mean here to guard against bad regions skewing the header
+                    overall_fwhm = float(psf_df['fwhm_avg'].median())
+                    psf_table_pass = psf_df.copy()
+
+                    # Save PSF table to CSV (dropping the 2D array)
+                    fpath_out_psf = PSF_SUBDIR / f"psf.{fpath_fits.stem}.csv"
+                    psf_df_save = psf_df.drop(columns=['avg_psf_data'])
+                    psf_df_save.to_csv(fpath_out_psf, index=False)
+                    logger.info(f"Saved spatial PSF catalog to {fpath_out_psf.name}")
+
+                    try:
+                        with fits.open(fpath_fits, mode='update') as hdul:
+                            hdul[0].header['PSFFILE'] = (fpath_out_psf.name, 'PSF table')  # short: fits on the card
+                            hdul[0].header['PSF_FWHM'] = (overall_fwhm, '[pixels] Median field PSF FWHM')
+                            hdul.flush()
+                    except Exception as e:
+                        logger.error(f"Failed to write PSF_FWHM header to {fpath_fits.name}: {e}")
+
+                # ---------------------------------------------------------
+                # STEP 2: Zero Point Calculation (Spatially Varying)
+                # ---------------------------------------------------------
+                success = lv2.calculate_zeropoint(
+                    fpath_fits=fpath_fits,
+                    gaia_data=gaia_isolated,
+                    outdir_zp=ZP_SUBDIR,
+                    mag_lower=13.0,
+                    mag_upper=15.0,
+                    psf_table=psf_table_pass,       # Pass the DataFrame to the photometer
+                    base_tile_size=500,             # Keep synchronized with soloPSF
+                    fallback_fwhm=overall_fwhm,     # Used if a specific region failed to fit
+                    ap_in_out=(1.5, 3.0, 4.0),      # Standard dynamic FWHM multipliers
+                    badpix_frac_max=args.badpix_frac_max
+                )
+
+                if not success:
+                    logger.warning(f"Failed to generate Level-2 Zero Point for {fpath_fits.name}")
+            except Exception:
+                # One bad frame must not end the night: log the traceback and continue
+                logger.exception(f"Lv2 failed for {Path(fpath_fits).name}; continuing with the next frame.")
 
         logger.info("Lv2 Zero-Point processing complete.")
 
@@ -493,4 +501,9 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # Record unexpected errors in the night's log, not only on the terminal
+        logging.getLogger("MAIN").exception("Pipeline aborted by an unexpected error")
+        raise SystemExit(1)

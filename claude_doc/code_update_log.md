@@ -431,3 +431,24 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - Full suite: 74 tests OK.
 - **Effect on products:** new Lv3 columns, and cleaned light curves can now be produced in tested code.
   `summary_results.ipynb` will be switched to this module after user review.
+
+### CU-020 · Root cause of the crashed nights 2026_0619 and 2026_0626 (§9.8; prerequisite for #2)
+
+- **Issue:** both runs stopped during Lv2 with no error in their logs. It reproduces deterministically on the two
+  frames where they stopped (`…181.p00.060.20260619061014`, `…346.n10.060.20260626091837`):
+  - `astropy.modeling.fitting.NonFiniteValueError` is raised by `LevMarLSQFitter` inside
+    `soloPSF._fit_gaussians` when one star's Gaussian fit diverges;
+  - it is not caught, so it escapes `process_ccd` and ends `main.py`;
+  - the traceback went only to the terminal (stderr), which `run_solopy.sh` does not keep, so the log simply stops.
+- **Change:**
+  - `psf.py`: a failing fit marks that star as failed (NaN FWHM) instead of raising.
+  - Driver: each Lv1 and Lv2 frame runs inside `try/except` with `logger.exception(...)`, so one bad frame is
+    logged with its traceback and the night continues. Any error that escapes `main()` is written to the night's
+    log before the script exits with status 1.
+- **Verification:**
+  - Both crash frames now finish `process_ccd` (64 tiles each; median FWHM 2.48 and 2.67 px).
+  - `tests/test_region_psf.py`: with a fitter that raises `NonFiniteValueError` on the first star, `process_ccd`
+    still returns all 4 tiles with FWHM within 0.15 px.
+  - Full suite passes.
+- **Effect on products:** nights 2026_0619 and 2026_0626 can now complete Lv2/Lv3, so they are re-processed as part
+  of #2.

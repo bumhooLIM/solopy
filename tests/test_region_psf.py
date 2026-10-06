@@ -22,6 +22,40 @@ class TestSOLORegion(unittest.TestCase):
 
 
 class TestSoloPSF(unittest.TestCase):
+    def test_a_diverging_fit_does_not_abort_the_frame(self):
+        # Regression: an astropy NonFiniteValueError in one star's fit escaped process_ccd and
+        # ended the 2026_0619 and 2026_0626 runs.
+        from astropy.modeling.fitting import LevMarLSQFitter, NonFiniteValueError
+
+        class FailsFirst(LevMarLSQFitter):
+            calls = 0
+
+            def __call__(self, *args, **kwargs):
+                FailsFirst.calls += 1
+                if FailsFirst.calls == 1:
+                    raise NonFiniteValueError("diverged")
+                return super().__call__(*args, **kwargs)
+
+        psf = soloPSF(init_fwhm=2.5, base_tile_size=500)
+        psf.fitter = FailsFirst()
+        table = psf.process_ccd(self._star_field())
+        self.assertEqual(len(table), 4)
+        np.testing.assert_allclose(table["fwhm_avg"], 2.6, atol=0.15)
+
+    @staticmethod
+    def _star_field(fwhm=2.6, seed=7):
+        rng = np.random.default_rng(seed)
+        shape, sigma = (1000, 1000), fwhm / 2.3548
+        yy, xx = np.indices(shape)
+        img = rng.normal(800.0, 6.5, shape)
+        for x0 in np.arange(40, 980, 60):
+            for y0 in np.arange(40, 980, 60):
+                x, y = x0 + rng.uniform(-5, 5), y0 + rng.uniform(-5, 5)
+                stamp = slice(int(y) - 12, int(y) + 13), slice(int(x) - 12, int(x) + 13)
+                img[stamp] += rng.uniform(800, 2500) * np.exp(
+                    -((xx[stamp] - x) ** 2 + (yy[stamp] - y) ** 2) / (2 * sigma ** 2))
+        return img.astype(np.float32)
+
     def test_recovers_injected_fwhm_per_tile(self):
         rng = np.random.default_rng(7)
         shape, fwhm = (1000, 1000), 2.6

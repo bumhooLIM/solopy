@@ -151,8 +151,17 @@ class soloPSF:
             init_guess.y_stddev.bounds = (1e-5, None)
             init_guess.amplitude.bounds = (0, None)
             
-            model = self.fitter(init_guess, x, y, psf_data, filter_non_finite=True)
-            
+            # A diverging fit raises (e.g. astropy's NonFiniteValueError when the model becomes
+            # non-finite). Treat it as a failed star: before 1.1 this exception escaped
+            # process_ccd and ended the whole night (2026_0619, 2026_0626).
+            try:
+                model = self.fitter(init_guess, x, y, psf_data, filter_non_finite=True)
+            except Exception:
+                flags.append(False)
+                fwhms.append(np.nan)
+                thetas.append(np.nan)
+                continue
+
             # Fixed: Check if fitter successfully converged
             if self.fitter.fit_info['ierr'] not in [1, 2, 3, 4]:
                 flags.append(False)
