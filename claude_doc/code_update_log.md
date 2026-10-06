@@ -308,3 +308,23 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   reported error is within 1 ± 0.12 in both modes. The pre-fix formula gives 0.77 on the same simulation.
 - **Effect on products:** `mag_err` and `snr` change (≈ −20 to −30 % errors for faint, sky-dominated sources).
   Systematic errors are added separately in Lv3 (`mag_err_tot`, CU-016). Needs Lv2/Lv3 re-run.
+
+### CU-015 · Restore flux lost to masked pixels inside the aperture (review R6)
+
+- **Issue:** masked pixels are excluded from the aperture sum, so their share of the source flux was simply lost.
+  - On real data, 3.6 % of asteroid measurements have 0 < masked fraction ≤ 5 % (accepted by CU-008).
+  - Most lose ~0.001 mag (pixels at the aperture edge), but 12 of 1,708 lost 0.01–0.09 mag.
+- **Change:** `fitslv2.py`:
+  - New `_psf_masked_fraction()` gives each source's PSF-weighted masked fraction (circular Gaussian of the local
+    FWHM, exact aperture weights). It is evaluated only for sources with masked pixels.
+  - `perform_photometry(..., psf_lost_max=0.05)` divides flux and error by (1 − `psf_lost_frac`) and flags
+    `badphot` when `psf_lost_frac` > 5 %. Fractions ≥ 50 % are not corrected.
+  - New column `psf_lost_frac`. Badphot is now: masked area > 5 %, or any saturated pixel, or masked PSF flux > 5 %,
+    or flux ≤ 0.
+- **Verification:** `tests/test_photometry.py`:
+  - a masked pixel 1.7 px from the center (3.8 % of the PSF): the corrected flux equals the truth within 0.01 %
+    (uncorrected: −3.8 %) and the source is not flagged;
+  - a masked peak pixel (≈ 13 %) is flagged even though it is only 2.3 % of the area.
+  - The CU-013 saturation and hot-pixel tests now use an edge pixel, so each rule is tested on its own.
+  - Full suite passes.
+- **Effect on products:** fluxes of sources with masked pixels in the aperture change; needs Lv2/Lv3 re-run.

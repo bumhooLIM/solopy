@@ -21,6 +21,30 @@ def _as_float_array(values):
     return np.atleast_1d(np.asarray(getattr(values, "value", values), dtype=float))
 
 
+def _psf_masked_fraction(aperture, mask, n_badpixel, fwhm):
+    """
+    Fraction of each source's in-aperture flux that falls on masked pixels, for a circular
+    Gaussian PSF of the given FWHM centred on the source (exact aperture weights).
+    Only sources with masked pixels in the aperture are evaluated; the rest get 0.
+    """
+    lost = np.zeros(len(n_badpixel))
+    if mask is None:
+        return lost
+    sigma = fwhm / 2.3548
+    for k in np.flatnonzero(n_badpixel > 0):
+        ap = aperture[k]
+        ap_mask = ap.to_mask(method='exact')
+        weights = ap_mask.data
+        masked = ap_mask.cutout(mask, fill_value=0).astype(bool)
+        bbox = ap_mask.bbox
+        yy, xx = np.mgrid[bbox.iymin:bbox.iymax, bbox.ixmin:bbox.ixmax]
+        x0, y0 = ap.positions
+        psf = np.exp(-((xx - x0) ** 2 + (yy - y0) ** 2) / (2.0 * sigma ** 2)) * weights
+        total = psf.sum()
+        lost[k] = psf[masked].sum() / total if total > 0 else 1.0
+    return lost
+
+
 class FitsLv2:
     """
     Class for Level-2 processing (Photometric Zero Point Calculation).
@@ -177,7 +201,8 @@ class FitsLv2:
                            x_col='x', y_col='y',
                            remove_bad_sources=False,
                            badpix_frac_max=0.05,
-                           gain=None):
+                           gain=None,
+                           psf_lost_max=0.05):
         """
         Perform fast, science-grade spatially varying aperture photometry.
         Automatically scales aperture radii per-region using GroupBy optimizations.
@@ -190,6 +215,11 @@ class FitsLv2:
 
         `mask` may be boolean or an Lv1 bit mask (`solopy.maskbits`); saturation can only
         be recognized from a bit mask.
+
+        Flux falling on masked (unsaturated) pixels inside the aperture is restored with a
+        Gaussian PSF of the local FWHM: `psf_lost_frac` is the PSF-weighted masked fraction,
+        flux and error are divided by (1 - psf_lost_frac), and the source is flagged when
+        psf_lost_frac > `psf_lost_max` (robustness review R6).
 
         Flux errors [ADU] count every noise term once (robustness review R5):
         with `gain` [e-/ADU], var = F/gain + A*sky_std**2 * (1 + A/n_sky), where the sky
@@ -306,6 +336,14 @@ class FitsLv2:
                     pixel_var = ap_area * ssky**2
 
                 phot_table["source_sum_err"] = np.sqrt(pixel_var + sky_mean_err_term)
+
+                # Restore flux that fell on masked pixels inside the aperture (review R6)
+                psf_lost = _psf_masked_fraction(aperture, mask, n_badpixel, local_fwhm)
+                correctable = psf_lost < 0.5
+                corr = np.where(correctable, 1.0 / (1.0 - np.where(correctable, psf_lost, 0.0)), 1.0)
+                phot_table['source_sum'] = np.asarray(phot_table['source_sum'], dtype=float) * corr
+                phot_table['source_sum_err'] = np.asarray(phot_table['source_sum_err'], dtype=float) * corr
+                flag_bad |= psf_lost > psf_lost_max
                 
                 phot_table["snr"] = phot_table["source_sum"] / phot_table["source_sum_err"]
                 
@@ -322,6 +360,7 @@ class FitsLv2:
                 phot_table["badpix_frac"] = badpix_frac
                 phot_table["saturated"] = saturated
                 phot_table["nsatpix"] = n_satpix
+                phot_table["psf_lost_frac"] = psf_lost
                 
                 # Convert this group's results to pandas
                 df_phot = phot_table.to_pandas().drop(columns=["id", "xcenter", "ycenter"])

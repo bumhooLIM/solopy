@@ -83,6 +83,20 @@ class TestPerformPhotometry(unittest.TestCase):
         self.assertEqual(row["badpix_frac"], 0.0)
         self.assertFalse(row["badphot"])
 
+    # --- flux restored for masked pixels inside the aperture (robustness review R6) ---
+    def test_masked_pixel_near_core_is_restored(self):
+        row = self._phot(mask=self._mask([(2, 0)])).iloc[0]      # pixel 1.7 px from the centre
+        self.assertGreater(row["psf_lost_frac"], 0.02)
+        self.assertLess(row["psf_lost_frac"], 0.05)
+        self.assertFalse(row["badphot"])
+        self.assertAlmostEqual(row["source_sum"] / (20000.0 * 0.998), 1.0, delta=0.01)
+
+    def test_masked_core_pixel_is_flagged(self):
+        row = self._phot(mask=self._mask([(0, 0)])).iloc[0]      # the peak pixel (~13 % of the flux)
+        self.assertGreater(row["psf_lost_frac"], 0.05)
+        self.assertLess(row["badpix_frac"], 0.05)
+        self.assertTrue(row["badphot"])
+
     # --- error model (robustness review R5) ---
     def _error_ratio(self, **kwargs):
         """Observed scatter of the flux over noise realizations / reported error (should be ~1)."""
@@ -105,16 +119,17 @@ class TestPerformPhotometry(unittest.TestCase):
     def test_single_saturated_pixel_always_flags(self):
         from solopy import maskbits
         bits = np.zeros(self.data.shape, dtype=np.uint8)
-        bits[51, 50] = maskbits.SATURATED                       # 1 core pixel = 2.3 % of the aperture
+        bits[51, 53] = maskbits.SATURATED      # one pixel near the aperture edge: 2.3 % of the area, <1 % of the PSF
         row = self._phot(mask=bits).iloc[0]
         self.assertLess(row["badpix_frac"], 0.05)
+        self.assertLess(row["psf_lost_frac"], 0.05)
         self.assertTrue(row["saturated"])
-        self.assertTrue(row["badphot"])
+        self.assertTrue(row["badphot"])        # flagged by saturation alone
 
     def test_single_hot_pixel_does_not_flag(self):
         from solopy import maskbits
         bits = np.zeros(self.data.shape, dtype=np.uint8)
-        bits[51, 50] = maskbits.BADPIX
+        bits[51, 53] = maskbits.BADPIX         # same pixel, but only a hot pixel
         row = self._phot(mask=bits).iloc[0]
         self.assertFalse(row["saturated"])
         self.assertFalse(row["badphot"])
