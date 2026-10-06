@@ -466,3 +466,19 @@ Tests run with the stdlib runner from the repo root: `python -m unittest discove
   - runs the same 33 nights.
 - **Verification:** `bash -n` syntax check; the night list is identical to the production script.
 - **Effect on products:** none until deployed with the driver.
+
+## 2026-10-06 · Documentation
+
+### CU-022 · README: introduction, installation, usage, reference
+
+- **Issue:** the README listed the processing levels and a few commands. It had no introduction to SOLO, no setup
+  from scratch, no description of the inputs `main.py` needs or the products it writes, and no citation.
+- **Change:** `README.md` rewritten in four parts:
+  - **Introduction:** instrument, survey, and processing levels.
+  - **Installation:** conda env, the `lv3` extra, astrometry.net index files, and the unit tests.
+  - **Usage:** `directory.py` entries, `main.py` options, `run_solopy.sh`, output products, `solopy.lightcurve`, and
+    library calls.
+  - **Reference:** Lim et al. 2026, JKAS.
+- **Verification:** commands, options, file names, and function signatures checked against `notebooks/main.py`,
+  `notebooks/run_solopy.sh`, `pyproject.toml`, and the package code. Documentation only.
+- **Effect on products:** none.
